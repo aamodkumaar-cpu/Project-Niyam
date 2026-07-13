@@ -11,13 +11,12 @@ the embedding model directly.
 from ollama import embed
 from backend.config.settings import EMBEDDING_MODEL
 
+class EmbeddingService:
 
+    def get_embedding(self, text: str) -> list[float]:
+        response = embed(
+            model=EMBEDDING_MODEL,
+            input=text
+        )
 
-def get_embedding(text):
-
-    response = embed(
-        model=EMBEDDING_MODEL,
-        input=text
-    )
-
-    return response["embeddings"][0]
+        return response["embeddings"][0]

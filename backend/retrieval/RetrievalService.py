@@ -13,4 +13,9 @@ class RetrievalService:
         question: str,
         top_k: int = 5
     ):
-        pass
+        query_embedding = self.embedding_service.get_embedding(question)
+
+        return self.vector_repository.search(
+            query_embedding=query_embedding,
+            top_k=top_k
+        )

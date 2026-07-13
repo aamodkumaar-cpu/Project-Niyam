@@ -1,28 +1,28 @@
-"""
-Project Niyam - Application Entry Point.
-
-Starts the application and coordinates user interactions.
-
-This file should remain lightweight and delegate business
-logic to the appropriate services.
-"""
-import os
+from backend.application import Application
+from pathlib import Path
 from backend.ingestion.IngestionService import IngestionService
-from backend.config.settings import DOCUMENTS_DIR, UPLOADS_DIR
+from backend.config.settings import DOCUMENTS_DIR
 
 
-def main():
+if __name__ == "__main__":
+    print("\nProject-Niyam is running...\n")
 
     ingestion_service = IngestionService()
 
     ingestion_service.ingest_document(
         document_id="resume",
-        pdf_path=os.path.join(DOCUMENTS_DIR, "Amod Kumar-Senior Engineering Leader.pdf")
+        pdf_path=Path(DOCUMENTS_DIR / "Amod Kumar-Senior Engineering Leader.pdf")
     )
+    app = Application()
+   
+    while True:
+        query = input("Ask question: ")
+        if query.lower() in ["exit", "quit"]:
+            break
 
-    print("\nDocument successfully indexed.\n")
+        results = app.retrieval_service.retrieve(query)
 
-
-
-if __name__ == "__main__":
-    main()
+        print("\nRelevant documents:")
+        for result in results:
+            print("----------------")
+            print(result)
