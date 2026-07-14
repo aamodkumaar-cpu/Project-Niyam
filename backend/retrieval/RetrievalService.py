@@ -1,3 +1,21 @@
+"""
+Retrieval Service.
+
+Purpose:
+    Coordinates semantic retrieval of relevant knowledge.
+
+Responsibilities:
+    - Generate query embeddings
+    - Retrieve relevant knowledge from the vector repository
+    - Return knowledge nodes
+
+Does NOT:
+    - Build prompts
+    - Call the LLM
+    - Modify retrieved knowledge
+"""
+
+
 class RetrievalService:
 
     def __init__(

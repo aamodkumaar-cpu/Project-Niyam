@@ -1,10 +1,18 @@
 """
 Vector Repository.
 
-Responsible for all interactions with the vector database.
+Purpose:
+    Provides all persistence operations for the vector database.
 
-Provides a clean interface for storing and retrieving document
-embeddings while hiding the underlying database implementation.
+Responsibilities:
+    - Store document embeddings
+    - Perform semantic similarity search
+    - Map database records to KnowledgeNode objects
+
+Does NOT:
+    - Generate embeddings
+    - Read PDF files
+    - Build prompts
 """
 
 
@@ -96,7 +104,7 @@ class VectorRepository:
             print(metadata)
             print(type(metadata["page_number"]))
             print(type(metadata["chunk_number"]))
-            
+
             document_metadata = DocumentMetadata(
                 document_id=str(metadata["document_id"]),
                 source= str(metadata["source"]),
@@ -112,6 +120,6 @@ class VectorRepository:
 
             knowledge_nodes.append(knowledge_node)
 
-        print(knowledge_nodes)
-        print(knowledge_nodes)
+        # print(knowledge_nodes)
+        # print(knowledge_nodes)
         return knowledge_nodes

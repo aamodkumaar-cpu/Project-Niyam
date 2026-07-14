@@ -1,9 +1,6 @@
 """
 Project-wide configuration.
-
-Centralizes all configurable values such as model names,
-database paths and application settings.
-
+Centralizes all configurable values such as model names, database paths and application settings.
 This avoids hardcoding values throughout the codebase.
 """
 
@@ -36,9 +33,7 @@ DOCUMENTS_DIR = BACKEND_ROOT / "documents"
 # Ollama
 # --------------------------------------------------------------------
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
 # --------------------------------------------------------------------
@@ -55,5 +50,9 @@ TOP_K = int(os.getenv("TOP_K", "5"))
 # Chunking
 # --------------------------------------------------------------------
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
-
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+
+# --------------------------------------------------------------------
+# Code Flags
+# --------------------------------------------------------------------
+DEBUG = True

@@ -20,9 +20,8 @@ if __name__ == "__main__":
         if query.lower() in ["exit", "quit"]:
             break
 
-        results = app.retrieval_service.retrieve(query)
+        result = app.search(query)
 
-        print("\nRelevant documents:")
-        for result in results:
-            print("----------------")
-            print(result)
+        print("\nAnswer")
+        print("------")
+        print(result.answer)
