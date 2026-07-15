@@ -8,6 +8,8 @@ Reads a document, splits it into chunks, generates embeddings
 for each chunk and stores them in the vector database.
 """
 
+from backend.config.settings import CHUNK_OVERLAP, CHUNK_SIZE
+from backend.diagnostic.ChunkInspector import ChunkInspector
 from backend.ingestion.EmbeddingService import EmbeddingService
 from backend.retrieval.VectorRepository import VectorRepository
 
@@ -34,8 +36,10 @@ class IngestionService:
 
 
         # Step 2 - Split into chunks
-        chunks = chunk_text(pages)
-
+        chunks = chunk_text( pages, CHUNK_SIZE, CHUNK_OVERLAP)
+        print("Calling ChunkInspector...")
+        ChunkInspector.inspect(chunks)
+        
         # Step 3 - Process each chunk
         for index, chunk in enumerate(chunks):
 

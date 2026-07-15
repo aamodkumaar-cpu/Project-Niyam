@@ -2,17 +2,17 @@
 Retrieval Service.
 
 Purpose:
-    Coordinates semantic retrieval of relevant knowledge.
+    Coordinates multiple retrieval strategies.
 
 Responsibilities:
-    - Generate query embeddings
-    - Retrieve relevant knowledge from the vector repository
-    - Return knowledge nodes
+    - Execute semantic retrieval
+    - Execute keyword retrieval
+    - Merge retrieval results
+    - Return relevant knowledge nodes
 
 Does NOT:
     - Build prompts
     - Call the LLM
-    - Modify retrieved knowledge
 """
 
 
@@ -20,20 +20,32 @@ class RetrievalService:
 
     def __init__(
         self,
-        embedding_service,
-        vector_repository
+        semantic_retrieval_service,
+        keyword_retrieval_service,
+        result_merger
     ):
-        self.embedding_service = embedding_service
-        self.vector_repository = vector_repository
 
+        self.semantic_retrieval_service = semantic_retrieval_service
+        self.keyword_retrieval_service = keyword_retrieval_service
+        self.result_merger = result_merger
+
+    
+    
     def retrieve(
         self,
-        question: str,
-        top_k: int = 5
+        question: str
     ):
-        query_embedding = self.embedding_service.get_embedding(question)
+        """Retrieve knowledge using all configured retrieval strategies."""
 
-        return self.vector_repository.search(
-            query_embedding=query_embedding,
-            top_k=top_k
+        semantic_nodes = self.semantic_retrieval_service.retrieve(
+            question
+        )
+
+        keyword_nodes = self.keyword_retrieval_service.retrieve(
+            question
+        )
+
+        return self.result_merger.merge(
+            semantic_nodes=semantic_nodes,
+            keyword_nodes=keyword_nodes
         )

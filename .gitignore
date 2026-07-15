@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 venv/
 data/chroma/
+.pytest_cache
 
 # Environment variables
 .env

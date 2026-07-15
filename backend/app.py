@@ -2,6 +2,7 @@ from backend.application import Application
 from pathlib import Path
 from backend.ingestion.IngestionService import IngestionService
 from backend.config.settings import DOCUMENTS_DIR
+from backend.presentation.ConsoleRenderer import ConsoleRenderer
 
 
 if __name__ == "__main__":
@@ -21,7 +22,7 @@ if __name__ == "__main__":
             break
 
         result = app.search(query)
-
-        print("\nAnswer")
-        print("------")
-        print(result.answer)
+        ConsoleRenderer.render(result)
+        # print("\nAnswer")
+        # print("------")
+        # print(result.answer)

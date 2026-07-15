@@ -19,6 +19,8 @@ Does NOT:
 import chromadb
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 from backend.retrieval.DocumentMetadata import DocumentMetadata
+from collections.abc import Mapping
+from typing import Any
 
 from backend.config.settings import (
     CHROMA_DB_PATH,
@@ -26,23 +28,37 @@ from backend.config.settings import (
 )
 
 
-def _coerce_str(value: object, default: str = "") -> str:
-    if isinstance(value, str):
-        return value
-    if value is None:
-        return default
-    return str(value)
+def _coerce_str(
+        value: object,
+        default: str = ""
+    ) -> str:
+
+        if isinstance(value, str):
+            return value
+
+        if value is None:
+            return default
+
+        return str(value)
 
 
-def _coerce_int(value: object, default: int = 0) -> int:
+def _coerce_int(
+    value: object,
+    default: int = 0
+) -> int:
+
     if isinstance(value, bool):
         return int(value)
+
     if isinstance(value, int):
         return value
+
     if isinstance(value, float):
         return int(value)
+
     if isinstance(value, str):
         return int(value)
+
     return default
 
 
@@ -74,6 +90,29 @@ class VectorRepository:
         )
     
 
+
+
+    def _to_knowledge_node(
+        self,
+        document: str,
+        metadata: Mapping[str,Any],
+        score: float
+    ) -> KnowledgeNode:
+
+        document_metadata = DocumentMetadata(
+            document_id=_coerce_str(metadata.get("document_id")),
+            source=_coerce_str(metadata.get("source")),
+            page_number=_coerce_int(metadata.get("page_number")),
+            chunk_number=_coerce_int(metadata.get("chunk_number"))
+        )
+
+        return KnowledgeNode(
+            content=document,
+            score=score,
+            metadata=document_metadata
+        )
+
+
     def search(
         self,
         query_embedding,
@@ -85,7 +124,7 @@ class VectorRepository:
             n_results=top_k
         )
 
-        print(type(results))
+        # print(type(results))
         
         documents = results.get("documents")
         metadatas = results.get("metadatas")
@@ -101,25 +140,53 @@ class VectorRepository:
             metadatas[0],
             distances[0]
         ):
-            print(metadata)
-            print(type(metadata["page_number"]))
-            print(type(metadata["chunk_number"]))
+            # print(metadata)
+            # print(type(metadata["page_number"]))
+            # print(type(metadata["chunk_number"]))
 
-            document_metadata = DocumentMetadata(
-                document_id=str(metadata["document_id"]),
-                source= str(metadata["source"]),
-                page_number=int(metadata["page_number"]),
-                chunk_number=int(metadata["chunk_number"])
+            knowledge_nodes.append(
+                self._to_knowledge_node(
+                    document=document,
+                    metadata=metadata,
+                    score=distance
+                )
             )
-
-            knowledge_node = KnowledgeNode(
-                content=document,
-                score=distance,
-                metadata=document_metadata
-            )
-
-            knowledge_nodes.append(knowledge_node)
 
         # print(knowledge_nodes)
         # print(knowledge_nodes)
+        return knowledge_nodes
+
+
+    def get_all_chunks(
+        self
+    ) -> list[KnowledgeNode]:
+
+        results = self.collection.get(
+            include=[
+                "documents",
+                "metadatas"
+            ]
+        )
+
+        documents = results.get("documents")
+        metadatas = results.get("metadatas")
+
+        if not documents or not metadatas:
+            return []
+
+        knowledge_nodes = []
+
+        for document, metadata in zip(
+            documents,
+            metadatas
+        ):
+
+            knowledge_nodes.append(
+                self._to_knowledge_node(
+                    document=document,
+                    metadata=metadata,
+                    score=0.0
+                )
+            )
+
         return knowledge_nodes
