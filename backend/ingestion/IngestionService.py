@@ -1,6 +1,6 @@
 
 """
-Document Service.
+Ingestion Service.
 
 Orchestrates the complete document ingestion pipeline.
 
@@ -10,6 +10,7 @@ for each chunk and stores them in the vector database.
 
 from backend.config.settings import CHUNK_OVERLAP, CHUNK_SIZE
 from backend.diagnostic.ChunkInspector import ChunkInspector
+from backend.ingestion.Document import Document
 from backend.ingestion.EmbeddingService import EmbeddingService
 from backend.retrieval.VectorRepository import VectorRepository
 
@@ -27,17 +28,19 @@ class IngestionService:
 
     def ingest_document(
         self,
-        document_id,
-        pdf_path
+        document:Document
     ):
 
+        if self.vector_repository.document_exists(document.id):
+            print(f"Skipping: {document.name} (already indexed)")
+        return
         # Step 1 - Read PDF
-        pages = read_pdf(pdf_path)
+        pages = read_pdf(document.path)
 
 
         # Step 2 - Split into chunks
         chunks = chunk_text( pages, CHUNK_SIZE, CHUNK_OVERLAP)
-        print("Calling ChunkInspector...")
+        
         ChunkInspector.inspect(chunks)
         
         # Step 3 - Process each chunk
@@ -46,14 +49,14 @@ class IngestionService:
             embedding = self.embedding_service.get_embedding(chunk.text)
 
             metadata = {
-                "document_id": document_id,
-                "source": pdf_path.name,
+                "document_id": document.id,
+                "source": document.name,
                 "page_number": chunk.page_number,
                 "chunk_number": index
             }
 
             self.vector_repository.store_document(
-                document_id=f"{document_id}_{index}",
+                document_id=f"{document.id}_{index}",
                 document=chunk.text,
                 embedding=embedding,
                 metadata=metadata

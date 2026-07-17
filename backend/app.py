@@ -1,28 +1,48 @@
+"""
+Project Niyam Entry Point.
+
+Starts the application, ingests all available documents,
+and launches the interactive question-answering console.
+"""
+
+
 from backend.application import Application
-from pathlib import Path
+from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
+from backend.ingestion.DocumentService import DocumentService
 from backend.ingestion.IngestionService import IngestionService
 from backend.config.settings import DOCUMENTS_DIR
 from backend.presentation.ConsoleRenderer import ConsoleRenderer
 
 
 if __name__ == "__main__":
-    print("\nProject-Niyam is running...\n")
+
+    print("\nProject Niyam is running...\n")
 
     ingestion_service = IngestionService()
 
-    ingestion_service.ingest_document(
-        document_id="resume",
-        pdf_path=Path(DOCUMENTS_DIR / "Amod Kumar-Senior Engineering Leader.pdf")
+    document_repository = DocumentCatalogRepository(
+        DOCUMENTS_DIR
     )
+    document_service = DocumentService(
+        document_repository
+    )       
+    for document in document_service.list_documents():
+
+        print(f"Ingesting: {document.name}")
+
+        ingestion_service.ingest_document(
+            document
+        )
+
     app = Application()
-   
+
     while True:
+
         query = input("Ask question: ")
+
         if query.lower() in ["exit", "quit"]:
             break
 
         result = app.search(query)
+
         ConsoleRenderer.render(result)
-        # print("\nAnswer")
-        # print("------")
-        # print(result.answer)

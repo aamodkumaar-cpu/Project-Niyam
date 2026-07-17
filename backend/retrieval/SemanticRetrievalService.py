@@ -31,8 +31,11 @@ class SemanticRetrievalService:
     def retrieve(
         self,
         question: str,
-        top_k: int = 5
+        top_k: int = 5,
+        where: dict | None = None
     ):
+        """Retrieve relevant knowledge using semantic search."""
+
         query_embedding = self.embedding_service.get_embedding(question)
 
         return self.vector_repository.search(

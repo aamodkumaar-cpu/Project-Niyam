@@ -27,7 +27,7 @@ from backend.config.settings import (
     VECTOR_COLLECTION
 )
 
-
+#Utility Method ----------------- START
 def _coerce_str(
         value: object,
         default: str = ""
@@ -41,11 +41,9 @@ def _coerce_str(
 
         return str(value)
 
-
 def _coerce_int(
     value: object,
-    default: int = 0
-) -> int:
+    default: int = 0) -> int:
 
     if isinstance(value, bool):
         return int(value)
@@ -61,9 +59,9 @@ def _coerce_int(
 
     return default
 
+#Utility Method ------------------ END
 
 class VectorRepository:
-
     def __init__(self):
 
         self.client = chromadb.PersistentClient(
@@ -79,8 +77,7 @@ class VectorRepository:
         document_id,
         document,
         embedding,
-        metadata
-    ):
+        metadata):
 
         self.collection.add(
             ids=[document_id],
@@ -88,16 +85,12 @@ class VectorRepository:
             embeddings=[embedding],
             metadatas=[metadata]
         )
-    
-
-
 
     def _to_knowledge_node(
         self,
         document: str,
         metadata: Mapping[str,Any],
-        score: float
-    ) -> KnowledgeNode:
+        score: float) -> KnowledgeNode:
 
         document_metadata = DocumentMetadata(
             document_id=_coerce_str(metadata.get("document_id")),
@@ -116,16 +109,24 @@ class VectorRepository:
     def search(
         self,
         query_embedding,
-        top_k=5
-    ):
+        top_k=5,
+        where: dict | None = None):
 
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k
-        )
-
-        # print(type(results))
         
+
+        query = {
+            "query_embeddings": [query_embedding],
+            "n_results": top_k
+        }
+        if where:
+            query["where"] = where
+
+        results = self.collection.query(**query)
+        # results = self.collection.query(
+        #     query_embeddings=[query_embedding],
+        #     n_results=top_k
+        # )
+
         documents = results.get("documents")
         metadatas = results.get("metadatas")
         distances = results.get("distances")
@@ -158,8 +159,7 @@ class VectorRepository:
 
 
     def get_all_chunks(
-        self
-    ) -> list[KnowledgeNode]:
+        self) -> list[KnowledgeNode]:
 
         results = self.collection.get(
             include=[
@@ -190,3 +190,30 @@ class VectorRepository:
             )
 
         return knowledge_nodes
+
+
+    def document_exists(
+        self,
+        document_id: str ) -> bool:
+
+        """Return True if the document has already been indexed."""
+
+        results = self.collection.get(
+            where={"document_id": document_id},
+            limit=1
+        )
+
+        return len(results["ids"]) > 0
+
+
+    def delete_document(
+        self,
+        document_id: str
+    ) -> None:
+        """Delete all chunks belonging to a document."""
+
+        self.collection.delete(
+            where={
+                "document_id": document_id
+            }
+        )
