@@ -47,11 +47,15 @@ class Application:
 
     def search(
         self,
-        question: str
+        question: str,
+        where: dict | None = None
     ) -> AnswerResult:
-        """Answer a question using the RAG pipeline."""
+        """Search the knowledge base and generate an answer."""
 
-        knowledge_nodes = self.retrieval_service.retrieve(question)
+        knowledge_nodes = self.retrieval_service.retrieve( 
+            question=question,
+            where=where
+        )
 
         RetrievalInspector.inspect(
             question,

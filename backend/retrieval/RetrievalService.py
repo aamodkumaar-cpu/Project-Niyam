@@ -16,6 +16,9 @@ Does NOT:
 """
 
 
+from backend.retrieval.KnowledgeNode import KnowledgeNode
+
+
 class RetrievalService:
 
     def __init__(
@@ -33,12 +36,14 @@ class RetrievalService:
     
     def retrieve(
         self,
-        question: str
-    ):
+        question: str,
+        where: dict | None = None
+    )-> list[KnowledgeNode] : 
         """Retrieve knowledge using all configured retrieval strategies."""
 
         semantic_nodes = self.semantic_retrieval_service.retrieve(
-            question
+            question=question,
+            where=where
         )
 
         keyword_nodes = self.keyword_retrieval_service.retrieve(

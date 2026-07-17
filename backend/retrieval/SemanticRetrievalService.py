@@ -40,5 +40,6 @@ class SemanticRetrievalService:
 
         return self.vector_repository.search(
             query_embedding=query_embedding,
-            top_k=top_k
+            top_k=top_k,
+            where=where
         )

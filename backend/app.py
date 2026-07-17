@@ -34,8 +34,20 @@ if __name__ == "__main__":
             document
         )
 
-    app = Application()
+    documents = document_service.list_documents()
+    print("\nIndexed Documents")
+    print("-----------------")
 
+    print("\nSearch Scope")
+    print("------------")
+    print("0. All Documents")
+    for index, document in enumerate(documents, start=1):
+        print(f"{index}. {document.name}")
+
+    selection = int(input("\nChoose: "))
+    print("selection:: ", selection)
+    
+    app = Application()
     while True:
 
         query = input("Ask question: ")

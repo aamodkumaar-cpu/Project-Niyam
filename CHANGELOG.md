@@ -6,6 +6,23 @@ The format follows Semantic Versioning.
 
 ---
 
+
+# Changelog
+
+## [Unreleased]
+
+### Added
+- Document model
+- DocumentCatalogRepository
+- DocumentService
+- Multi-document ingestion
+- Duplicate detection
+- Metadata filtering foundation
+
+## [0.2.0]
+...
+
+
 ## [v0.2.0] - 2026-07-15
 
 ### Added
