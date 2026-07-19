@@ -33,7 +33,7 @@ class IngestionService:
 
         if self.vector_repository.document_exists(document.id):
             print(f"Skipping: {document.name} (already indexed)")
-        return
+            return
         # Step 1 - Read PDF
         pages = read_pdf(document.path)
 

@@ -217,3 +217,11 @@ class VectorRepository:
                 "document_id": document_id
             }
         )
+
+
+
+    def count_chunks(
+        self
+    ) -> int:
+        """Return the total number of indexed chunks."""
+        return self.collection.count()
