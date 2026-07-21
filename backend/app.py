@@ -7,6 +7,7 @@ and launches the interactive question-answering console.
 
 
 from backend.application import Application
+from backend.compliance.BusinessProfile import BusinessProfile
 from backend.ingestion.Document import Document
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
 from backend.ingestion.DocumentService import DocumentService
@@ -15,6 +16,7 @@ from backend.ingestion.IngestionService import IngestionService
 from backend.config.settings import DOCUMENTS_DIR
 from backend.presentation.ConsoleRenderer import ConsoleRenderer
 from backend.retrieval.VectorRepository import VectorRepository
+from backend.orchestration.RequestRouter import RequestRouter
 
 
 
@@ -49,18 +51,12 @@ def choose_search_scope(
             print(f"{index}. {document.name}")
 
         while True:
-
             try:
-
-                selection = int(
-                    input("\nChoose: ")
-                )
+                selection = int( input("\nChoose: ") )
 
                 if 0 <= selection <= len(documents):
                     break
-
                 print("Invalid selection.")
-
             except ValueError:
                 print("Please enter a number.")
 
@@ -99,20 +95,40 @@ if __name__ == "__main__":
         statistics
     )
 
-    documents = document_service.list_documents()
-
     where = choose_search_scope(
         documents
     )
    
+    app=Application()
+    router = RequestRouter(
+    app
+)
 
-    app = Application()
+    business_profile = BusinessProfile(
+        company_size=12,
+        state="Delhi"
+    )
+    checklist = app.generate_compliance_checklist(
+        business_profile
+    )
+    
+
+    ConsoleRenderer.render_compliance_checklist(
+        checklist
+    )
+
     while True:
         query = input("Ask question: ")
         if query.lower() in ["exit", "quit"]:
             break
 
-        result = app.search(
+        intent = app.detect_intent(
+            query
+        )
+        print(f"\nIntent: {intent.type.name}\n")
+
+
+        result = router.route(
             question=query,
             where=where
         )

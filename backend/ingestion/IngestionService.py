@@ -51,6 +51,8 @@ class IngestionService:
             metadata = {
                 "document_id": document.id,
                 "source": document.name,
+                "domain": document.domain.value,
+                "compliance_pack": document.compliance_pack,
                 "page_number": chunk.page_number,
                 "chunk_number": index
             }

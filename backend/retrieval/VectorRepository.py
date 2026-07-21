@@ -17,6 +17,7 @@ Does NOT:
 
 
 import chromadb
+from backend.ingestion.KnowledgeDomain import KnowledgeDomain
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 from backend.retrieval.DocumentMetadata import DocumentMetadata
 from collections.abc import Mapping
@@ -96,7 +97,20 @@ class VectorRepository:
             document_id=_coerce_str(metadata.get("document_id")),
             source=_coerce_str(metadata.get("source")),
             page_number=_coerce_int(metadata.get("page_number")),
-            chunk_number=_coerce_int(metadata.get("chunk_number"))
+            chunk_number=_coerce_int(metadata.get("chunk_number")),
+            domain=KnowledgeDomain(
+                        _coerce_str(
+                            metadata.get(
+                                "domain",
+                                KnowledgeDomain.GENERAL.value
+                            )
+                        )
+                    ),
+            compliance_pack =_coerce_str(
+                    metadata.get(
+                        "compliance_pack"
+                        )
+                    )
         )
 
         return KnowledgeNode(

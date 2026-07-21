@@ -18,8 +18,8 @@ Does NOT:
 
 
 from pathlib import Path
-
 from backend.ingestion.Document import Document
+from backend.ingestion.DocumentDomainResolver import DocumentDomainResolver
 
 
 class DocumentCatalogRepository:
@@ -35,13 +35,15 @@ class DocumentCatalogRepository:
 
         documents = []
 
-        for path in sorted(self.documents_directory.glob("*.pdf")):
+        for path in sorted(self.documents_directory.rglob("*.pdf")):
 
             documents.append(
                 Document(
                     id=path.stem,
                     name=path.name,
-                    path=str(path)
+                    path=str(path),
+                    domain=DocumentDomainResolver.resolve(path.name),
+                    compliance_pack = path.parent.name
                 )
             )
 

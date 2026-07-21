@@ -21,6 +21,25 @@ from backend.results.AnswerResult import AnswerResult
 class ConsoleRenderer:
 
     @staticmethod
+    def render_compliance_checklist(
+        checklist
+        ):
+
+        """Render a compliance checklist."""
+
+        print("\nCompliance Checklist")
+        print("-" * 80)
+
+        for item in checklist.items:
+            status = "✓" if item.mandatory else "-"
+            print(f"{status} {item.title}")
+            print(f"  {item.description}")
+            print()
+
+
+
+
+    @staticmethod
     def render(
         result: AnswerResult
     ):
@@ -45,3 +64,5 @@ class ConsoleRenderer:
             )
 
         print("\n" + "=" * 80)
+
+    
