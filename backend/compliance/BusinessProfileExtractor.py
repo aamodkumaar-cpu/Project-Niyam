@@ -31,6 +31,8 @@ class BusinessProfileExtractor:
         state = self._extract_state(question)
 
         return BusinessProfile(
+            business_name="Unknown",
+            industry="Unknown",
             company_size=company_size,
             state=state
         )

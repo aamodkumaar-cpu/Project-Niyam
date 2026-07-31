@@ -45,7 +45,6 @@ class RetrievalInspector:
         for rank, node in enumerate(knowledge_nodes, start=1):
 
             print("-" * 80)
-
             print(f"Rank       : {rank}")
             print(f"Score      : {node.score:.4f}")
             print(f"Page       : {node.metadata.page_number}")

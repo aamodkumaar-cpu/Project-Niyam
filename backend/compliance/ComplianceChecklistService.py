@@ -12,45 +12,50 @@ Does NOT:
     - Call the LLM
 """
 
+from pickle import TRUE
 from backend.compliance.BusinessProfile import BusinessProfile
 from backend.compliance.ComplianceChecklist import ComplianceChecklist
 from backend.compliance.ComplianceItem import ComplianceItem
+from backend.compliance.ComplianceRuleEngine import ComplianceRuleEngine
+
+from backend.compliance.ComplianceRuleEngine import (
+    ComplianceRuleEngine
+)
 
 
 class ComplianceChecklistService:
-    """Generates compliance checklists."""
 
-    def generate(
-        self,
-        business_profile: BusinessProfile
-    ) -> ComplianceChecklist:
-        """Generate a compliance checklist."""
-        checklist = ComplianceChecklist()
+        """Generates compliance checklists."""
 
-        if business_profile.company_size >= 1:
-            checklist.items.append(
-                ComplianceItem(
-                    title="Appointment Letters",
-                    description="Issue appointment letters to all employees.",
-                    mandatory=True
-                )
+        def __init__(
+            self
+        ):
+            """Initialize the compliance checklist service."""
+            self.rule_engine = (
+                ComplianceRuleEngine()
             )
 
-        if business_profile.company_size >= 10:
-            checklist.items.append(
-                ComplianceItem(
-                    title="PF Registration",
-                    description="Register under the Employees' Provident Fund.",
-                    mandatory=True
-                )
+
+
+        def generate(
+            self,
+            business_profile: BusinessProfile
+        ) -> ComplianceChecklist:
+            """Generate a compliance checklist."""
+            applicable_rules = self.rule_engine.evaluate(
+                business_profile
             )
 
-            checklist.items.append(
-                ComplianceItem(
-                    title="ESIC Registration",
-                    description="Register under the Employees' State Insurance Scheme.",
-                    mandatory=True
+            items = []
+            for applicable_rule in applicable_rules:
+                items.append(
+                    ComplianceItem(
+                        title=applicable_rule.rule.title,
+                        description=applicable_rule.rule.description,
+                        mandatory=True
+                    )
                 )
-            )
 
-        return checklist
+            return ComplianceChecklist(
+                items=items
+            )

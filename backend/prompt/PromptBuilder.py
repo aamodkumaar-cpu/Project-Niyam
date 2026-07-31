@@ -44,17 +44,10 @@ class PromptBuilder:
                     You are Project Niyam.
 
                     Use ONLY the supplied context.
-
                     Do not use external knowledge.
-
-                    If the answer exists in the context,
-                    answer it.
-
-                    If the context contains only a partial mention,
-                    state exactly what is mentioned.
-
-                    If the topic is completely absent,
-                    reply:
+                    If the answer exists in the context, answer it.
+                    If the context contains only a partial mention, state exactly what is mentioned.
+                    If the topic is completely absent, reply:
 
                     "I could not find the answer in the available documents."
                     """
@@ -68,12 +61,9 @@ class PromptBuilder:
 
                     {context}
 
-                    Question
-                    =======
-                    {question}
-
-                    Answer
-                    ======
+Question
+=======
+{question}
                     """
             }
 

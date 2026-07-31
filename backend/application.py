@@ -5,10 +5,12 @@ Responsible for wiring all application components together.
 """
 from backend.compliance.BusinessProfile import BusinessProfile
 from backend.compliance.BusinessProfileExtractor import BusinessProfileExtractor
+from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.compliance.ComplianceChecklistService import ComplianceChecklistService
 from backend.ingestion.KnowledgeDomain import KnowledgeDomain
 from backend.intents.IntentClassifier import IntentClassifier
 from backend.intents.IntentType import IntentType
+from backend.orchestration.RequestContext import RequestContext
 from backend.retrieval.SemanticRetrievalService import SemanticRetrievalService
 from backend.retrieval.KeywordRetrievalService import KeywordRetrievalService
 from backend.retrieval.ResultMerger import ResultMerger
@@ -53,6 +55,10 @@ class Application:
         self.intent_classifier = IntentClassifier()
 
         self.business_profile_extractor = BusinessProfileExtractor()
+        self.business_profile_session = (BusinessProfileSession())
+
+
+#-------- END of init() method ----------------------------------------
 
     def detect_intent(
         self,
@@ -67,17 +73,16 @@ class Application:
 
     def search(
         self,
-        question: str,
-        where: dict | None = None,
+        context: RequestContext,
         domain: KnowledgeDomain | None = None
     ) -> AnswerResult:
         """Search the knowledge base and generate an answer."""
 
-        intent = self.detect_intent(question)
+        intent = self.detect_intent(context.question)
 
         if intent.type == IntentType.COMPLIANCE_CHECKLIST:
             business_profile = self.business_profile_extractor.extract(
-                question
+                context.question
             )
             checklist = self.generate_compliance_checklist(
                 business_profile
@@ -99,17 +104,17 @@ class Application:
             }
             
         knowledge_nodes = self.retrieval_service.retrieve( 
-            question=question,
-            where=where
+            question=context.question,
+            where=context.where
         )
 
         RetrievalInspector.inspect(
-            question,
+            context.question,
             knowledge_nodes
         )
 
         messages = self.prompt_builder.build(
-            question=question,
+            question=context.question,
             knowledge_nodes=knowledge_nodes
         )
         PromptInspector.inspect(messages)
@@ -135,3 +140,22 @@ class Application:
         return self.compliance_checklist_service.generate(
             business_profile
         )
+
+    
+    def set_business_profile(
+        self,
+        business_profile: BusinessProfile
+    ) -> None:
+        """Store the active business profile."""
+
+        self.business_profile_session.set_business_profile(
+            business_profile
+        )
+    
+
+    def get_business_profile(
+        self
+    ) -> BusinessProfile:
+        """Return the active business profile."""
+
+        return self.business_profile_session.get_business_profile()

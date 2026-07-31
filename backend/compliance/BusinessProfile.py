@@ -2,14 +2,14 @@
 Business Profile.
 
 Purpose:
-    Represents the business information required for compliance.
+    Represents a business seeking compliance guidance.
 
 Responsibilities:
-    - Store business profile information
+    - Store business information
 
 Does NOT:
-    - Perform compliance evaluation
-    - Read documents
+    - Validate business rules
+    - Determine compliance
 """
 
 from dataclasses import dataclass
@@ -19,5 +19,7 @@ from dataclasses import dataclass
 class BusinessProfile:
     """Represents a business profile."""
 
+    business_name: str
+    industry: str
     company_size: int
     state: str

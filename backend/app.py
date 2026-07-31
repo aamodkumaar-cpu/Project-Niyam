@@ -8,6 +8,7 @@ and launches the interactive question-answering console.
 
 from backend.application import Application
 from backend.compliance.BusinessProfile import BusinessProfile
+from backend.compliance.BusinessProfileCollector import BusinessProfileCollector
 from backend.ingestion.Document import Document
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
 from backend.ingestion.DocumentService import DocumentService
@@ -90,42 +91,24 @@ if __name__ == "__main__":
         ingestion_service.ingest_document(document)
 
     statistics = document_service.get_statistics()
-    
-    show_startup_banner(
-        statistics
-    )
-
-    where = choose_search_scope(
-        documents
-    )
+    show_startup_banner( statistics )
+    where = choose_search_scope( documents )
    
     app=Application()
-    router = RequestRouter(
-    app
-)
+    router = RequestRouter(app)
 
-    business_profile = BusinessProfile(
-        company_size=12,
-        state="Delhi"
-    )
-    checklist = app.generate_compliance_checklist(
-        business_profile
-    )
+    collector = BusinessProfileCollector()
+    business_profile = collector.collect()
+    app.set_business_profile(business_profile)
+    checklist = app.generate_compliance_checklist(app.get_business_profile())
     
 
-    ConsoleRenderer.render_compliance_checklist(
-        checklist
-    )
+    ConsoleRenderer.render_compliance_checklist( checklist )
 
     while True:
         query = input("Ask question: ")
         if query.lower() in ["exit", "quit"]:
             break
-
-        intent = app.detect_intent(
-            query
-        )
-        print(f"\nIntent: {intent.type.name}\n")
 
 
         result = router.route(

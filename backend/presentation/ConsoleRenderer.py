@@ -44,8 +44,6 @@ class ConsoleRenderer:
         result: AnswerResult
     ):
 
-        print("\n")
-        print("=" * 80)
 
         print("\nAnswer")
         print("-" * 80)
@@ -55,14 +53,16 @@ class ConsoleRenderer:
         print("\nSources")
         print("-" * 80)
 
-        for index, source in enumerate(result.sources, start=1):
+        if not result.sources:
+            print("No sources identified..")
+        else:
+            for index, source in enumerate(result.sources, start=1):
+                print(
+                    f"{index}. "
+                    f"{source.source} "
+                    f"(Page {source.page_number})"
+                )
+        
+        print( "-" * 80)
+        print("\n")
 
-            print(
-                f"{index}. "
-                f"{source.source} "
-                f"(Page {source.page_number})"
-            )
-
-        print("\n" + "=" * 80)
-
-    
