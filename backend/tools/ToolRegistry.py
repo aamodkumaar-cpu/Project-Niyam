@@ -1,41 +1,50 @@
 """
 Tool Registry.
 
+Type:
+    Infrastructure
+
 Purpose:
-    Registers and provides application tools.
+    Maintains the mapping between business capabilities and tools.
 
 Responsibilities:
     - Register tools
-    - Return tools by name
+    - Return tools by capability
 
 Does NOT:
+    - Create tools
     - Execute tools
-    - Route requests
+    - Perform orchestration
 """
 
-from backend.tools.ComplianceChecklistTool import ComplianceChecklistTool
-from backend.tools.KnowledgeSearchTool import KnowledgeSearchTool
+from backend.orchestration.Capability import Capability
+from backend.tools.Tool import Tool
 
 
 class ToolRegistry:
     """Stores all available tools."""
 
-    def __init__(self):
+    _tools: dict[Capability, Tool]
 
-        self.tools = {
+    def __init__(self) -> None:
+        """Initialize the registry."""
 
-            "compliance_checklist":
-                ComplianceChecklistTool(),
+        self._tools = {}
 
-            "knowledge_search":
-                KnowledgeSearchTool()
-        }
+    # ---------- Public API ----------
 
-# -------------- END - init() ------------------------
+    def register(
+        self,
+        tool: Tool
+    ) -> None:
+        """Register a tool."""
+
+        self._tools[tool.capability] = tool
 
     def get(
         self,
-        name: str
-    ):
-        """Return a tool."""
-        return self.tools[name]
+        capability: Capability
+    ) -> Tool:
+        """Return the registered tool."""
+
+        return self._tools[capability]

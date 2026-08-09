@@ -1,36 +1,43 @@
 """
 Keyword Tokenizer.
 
+Type:
+    Domain Service
+
 Purpose:
-    Converts text into searchable keywords.
+    Converts user text into normalized search tokens.
 
 Responsibilities:
-    - Lowercase text
-    - Remove punctuation
-    - Split into words
+    - Normalize text.
+    - Remove punctuation.
+    - Tokenize into searchable words.
+    - Remove duplicate tokens while preserving order.
 
 Does NOT:
-    - Perform retrieval
-    - Rank results
-    - Generate embeddings
+    - Perform retrieval.
+    - Rank results.
+    - Generate embeddings.
+    - Remove stop words.
 """
 
 import re
 
 
 class KeywordTokenizer:
+    """Converts text into normalized search tokens."""
 
     def tokenize(
         self,
         text: str
     ) -> list[str]:
+        """Return normalized search tokens."""
 
-        text = text.lower()
-
-        text = re.sub(
+        normalized = re.sub(
             r"[^a-z0-9\s]",
             " ",
-            text
+            text.lower()
         )
 
-        return text.split()
+        tokens = normalized.split()
+
+        return list(dict.fromkeys(tokens))

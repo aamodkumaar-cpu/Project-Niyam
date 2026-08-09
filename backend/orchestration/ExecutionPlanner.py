@@ -1,29 +1,39 @@
 """
 Execution Planner.
 
+Type:
+    Planner Director
+
 Purpose:
-    Creates an execution plan for a user request.
+    Selects the appropriate planner strategy.
 
 Responsibilities:
-    - Decide which steps are required
-    - Build an execution plan
+    - Select the planner
+    - Delegate plan creation
 
 Does NOT:
     - Execute tools
-    - Call the LLM
-    - Retrieve documents
+    - Build workflows directly
+    - Detect intent
 """
 
-
-from backend.orchestration.ExecutionPlan import ExecutionPlan
 from backend.intents.Intent import Intent
 from backend.intents.IntentType import IntentType
-from backend.orchestration.ExecutionStep import ExecutionStep
+from backend.orchestration.ExecutionPlan import ExecutionPlan
+
+from backend.planning.KnowledgePlanner import KnowledgePlanner
+from backend.planning.CompliancePlanner import CompliancePlanner
 
 
 class ExecutionPlanner:
-    """Creates execution plans."""
+    """Delegates planning to specialized planners."""
 
+    def __init__(self):
+
+        self.planners = {
+            IntentType.QUESTION: KnowledgePlanner(),
+            IntentType.COMPLIANCE_CHECKLIST: CompliancePlanner()
+        }
 
     def create_plan(
         self,
@@ -31,27 +41,11 @@ class ExecutionPlanner:
     ) -> ExecutionPlan:
         """Create an execution plan."""
 
-        if intent.type == IntentType.COMPLIANCE_CHECKLIST:
+        planner = self.planners.get(intent.type)
 
-            return ExecutionPlan(
-                steps=[
-                    ExecutionStep(
-                        tool_name="compliance_checklist",
-                        input_data=None,
-                        description="Generate compliance checklist"
-                    )
-                ]
+        if planner is None:
+            raise ValueError(
+                f"No planner registered for {intent.type}"
             )
 
-        return ExecutionPlan(
-            steps=[
-                ExecutionStep(
-                    tool_name="knowledge_search",
-                    description="Search the knowledge base"
-                ),
-                ExecutionStep(
-                    tool_name="answer_formatter",
-                    description="Format the final answer"
-                )
-            ]
-        )
+        return planner.create_plan(intent)

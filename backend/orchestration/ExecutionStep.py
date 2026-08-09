@@ -2,30 +2,27 @@
 Execution Step.
 
 Type:
-    Data Model (DTO)
+    Workflow Model
 
 Purpose:
-    Represents one executable step within an execution plan.
+    Represents a single step within an execution plan.
 
 Responsibilities:
-    - Store the tool to execute
-    - Store the tool input
-    - Store execution metadata
+    - Store the capability to execute.
 
 Does NOT:
-    - Execute the tool
-    - Perform planning
-    - Store business logic
+    - Execute the capability.
+    - Know which tool implements the capability.
+    - Perform orchestration.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from backend.orchestration.Capability import Capability
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExecutionStep:
-    """Represents one execution step."""
-    
-    tool_name: str
-    input_data: Any = None
-    description: str = ""
+    """
+    Represents one executable workflow step.
+    """
+    capability: Capability

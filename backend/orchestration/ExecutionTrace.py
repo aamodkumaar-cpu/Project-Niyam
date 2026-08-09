@@ -2,31 +2,36 @@
 Execution Trace.
 
 Type:
-    Data Model
+    Runtime Model
 
 Purpose:
-    Represents the execution history of one request.
+    Stores the complete execution history of one workflow.
 
 Responsibilities:
     - Store execution records
-    - Preserve execution order
+    - Provide execution history
 
 Does NOT:
-    - Execute tools
-    - Measure execution
-    - Log information
+    - Execute workflow steps
+    - Print results
 """
 
-
 from dataclasses import dataclass, field
-
 from backend.orchestration.ExecutionRecord import ExecutionRecord
 
 
 @dataclass
 class ExecutionTrace:
-    """Execution history for one request."""
+    """Represents one workflow execution."""
 
     records: list[ExecutionRecord] = field(
         default_factory=list
     )
+
+    def add(
+        self,
+        record: ExecutionRecord
+    ):
+        """Add one execution record."""
+
+        self.records.append(record)

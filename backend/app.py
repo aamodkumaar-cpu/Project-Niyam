@@ -6,19 +6,13 @@ and launches the interactive question-answering console.
 """
 
 
-from backend.application import Application
-from backend.compliance.BusinessProfile import BusinessProfile
+
+from backend.bootstrap.ServiceRegistry import ServiceRegistry
 from backend.compliance.BusinessProfileCollector import BusinessProfileCollector
 from backend.ingestion.Document import Document
-from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
-from backend.ingestion.DocumentService import DocumentService
 from backend.ingestion.DocumentStatistics import DocumentStatistics
-from backend.ingestion.IngestionService import IngestionService
-from backend.config.settings import DOCUMENTS_DIR
 from backend.presentation.ConsoleRenderer import ConsoleRenderer
-from backend.retrieval.VectorRepository import VectorRepository
-from backend.orchestration.RequestRouter import RequestRouter
-
+from chromadb.types import Where
 
 
 def show_startup_banner(
@@ -40,7 +34,7 @@ def show_startup_banner(
 
 def choose_search_scope(
         documents: list[Document]
-    ) -> dict | None:
+    ) -> Where | None:
         """Return the selected document filter."""
 
         print("\nSearch Scope")
@@ -73,50 +67,37 @@ def choose_search_scope(
 
 if __name__ == "__main__":
 
-    ingestion_service = IngestionService()
-    vector_repository = VectorRepository()
+    registry = ServiceRegistry()
+    documents = registry.document_service.list_documents()
 
-    document_repository = DocumentCatalogRepository(
-        DOCUMENTS_DIR
-    )
-    document_service = DocumentService(
-        document_repository=document_repository,
-        vector_repository=vector_repository
-    )   
-
-
-    documents = document_service.list_documents()
     for document in documents:
         print(f"Ingesting: {document.name}")
-        ingestion_service.ingest_document(document)
+        registry.ingestion_service.ingest_document(
+            document
+        )
 
-    statistics = document_service.get_statistics()
-    show_startup_banner( statistics )
+    statistics = registry.document_service.get_statistics()
+    show_startup_banner(statistics)
     where = choose_search_scope( documents )
-   
-    app=Application()
-    router = RequestRouter(app)
-
     collector = BusinessProfileCollector()
     business_profile = collector.collect()
-    app.set_business_profile(business_profile)
-    checklist = app.generate_compliance_checklist(app.get_business_profile())
-    
-
-    ConsoleRenderer.render_compliance_checklist( checklist )
+    registry.business_profile_session.set_business_profile( business_profile )
 
     while True:
-        query = input("Ask question: ")
-        if query.lower() in ["exit", "quit"]:
+        question = input("\nAsk Question : ")
+        if question.lower() in (
+            "exit",
+            "quit"
+        ):
             break
 
-
-        result = router.route(
-            question=query,
+        execution = registry.request_router.route(
+            question=question,
             where=where
         )
 
-        ConsoleRenderer.render(result)
-
+        assert execution.answer is not None
+        ConsoleRenderer.render_answer( execution.answer  )
+        ConsoleRenderer.render_execution_trace( execution.trace )
 
     

@@ -2,23 +2,28 @@
 Execution Plan.
 
 Purpose:
-    Represents the sequence of actions required
-    to satisfy a user request.
+    Represents the sequence of capabilities that should be executed
+    to satisfy a user's request.
 
 Responsibilities:
-    - Store execution steps
+    - Store the ordered list of capabilities.
+    - Act as the contract between the Planner and WorkflowExecutor.
 
 Does NOT:
-    - Execute steps
-    - Route requests
+    - Execute tools.
+    - Perform planning.
+    - Contain business logic.
 """
 
 from dataclasses import dataclass
-from backend.orchestration.ExecutionStep import ExecutionStep
+
+from backend.orchestration.Capability import Capability
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecutionPlan:
-    
-    """Represents an execution plan."""
-    steps: list[ExecutionStep]
+    """
+    Ordered list of capabilities to execute.
+    """
+
+    capabilities: list[Capability]

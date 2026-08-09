@@ -14,51 +14,44 @@ Does NOT:
     - Call the LLM directly
 """
 
-from backend.application import Application
-from backend.orchestration.RequestContext import RequestContext
-from backend.results.AnswerResult import AnswerResult
-from backend.tools.ToolRegistry import ToolRegistry
-from backend.intents.IntentType import IntentType
+from chromadb.types import Where
 from backend.agent.NiyamAgent import NiyamAgent
+from backend.compliance.BusinessProfileSession import BusinessProfileSession
+from backend.orchestration.ExecutionResult import ExecutionResult
+from backend.orchestration.RequestContext import RequestContext
 
 
 class RequestRouter:
+    """Routes user requests to the Niyam agent."""
+
+    business_profile_session: BusinessProfileSession
+    agent: NiyamAgent
 
     def __init__(
         self,
-        application: Application
-    ):
+        business_profile_session: BusinessProfileSession,
+        agent: NiyamAgent
+    ) -> None:
         """Initialize the request router."""
 
-        self.application = application
-        self.agent = NiyamAgent()
+        self.business_profile_session = business_profile_session
+        self.agent = agent
 
+#------------ END of init() -------------------
 
     def route(
         self,
         question: str,
-        where: dict | None = None
-    ) -> AnswerResult:
-        """Route the user request."""
+        where: Where | None = None
+    ) -> ExecutionResult:
+        """
+        Route the user request.
+        """
 
-        context = RequestContext(
+        request = RequestContext(
             question=question,
-            business_profile=self.application.get_business_profile(),
+            business_profile=self.business_profile_session.get_business_profile(),
             where=where
         )
 
-        return self.agent.handle(context)
-
-        # intent = self.application.detect_intent( question )
-        # print( f"\nRouting -> {intent.type.name}\n" )
-
-        # if intent.type == IntentType.COMPLIANCE_CHECKLIST:
-        #     checklist = checklist = self.tool_registry.get("compliance_checklist").execute( context )
-        #     answer = "\n".join( item.title for item in checklist.items )
-        #     return AnswerResult(
-        #         answer=answer,
-        #         sources=[]
-        #     )
-
-
-        # return self.application.search( context)
+        return self.agent.handle(request)

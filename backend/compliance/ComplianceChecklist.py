@@ -12,12 +12,12 @@ Does NOT:
 """
 
 from dataclasses import dataclass, field
-
 from backend.compliance.ComplianceItem import ComplianceItem
+from backend.tools.results.ToolResult import ToolResult
 
 
 @dataclass
-class ComplianceChecklist:
+class ComplianceChecklist(ToolResult):
     """Represents a compliance checklist."""
 
     items: list[ComplianceItem] = field(default_factory=list)

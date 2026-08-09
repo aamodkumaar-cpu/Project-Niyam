@@ -1,52 +1,81 @@
-
 """
 Ingestion Service.
 
-Orchestrates the complete document ingestion pipeline.
+Type:
+    Domain Service
 
-Reads a document, splits it into chunks, generates embeddings
-for each chunk and stores them in the vector database.
+Purpose:
+    Orchestrates the complete document ingestion pipeline.
+
+Responsibilities:
+    - Read documents
+    - Chunk documents
+    - Generate embeddings
+    - Store knowledge in the vector repository
+
+Does NOT:
+    - Build prompts
+    - Execute retrieval
+    - Call the LLM
 """
 
 from backend.config.settings import CHUNK_OVERLAP, CHUNK_SIZE
-from backend.diagnostic.ChunkInspector import ChunkInspector
+
+from backend.diagnostic.ExecutionDebugger import ExecutionDebugger
 from backend.ingestion.Document import Document
 from backend.ingestion.EmbeddingService import EmbeddingService
-from backend.retrieval.VectorRepository import VectorRepository
-
 from backend.ingestion.PDFReader import read_pdf
 from backend.ingestion.TextChunker import chunk_text
+from backend.retrieval.VectorRepository import VectorRepository
 
 
 class IngestionService:
+    """Coordinates the document ingestion pipeline."""
 
-    def __init__(self):
-        self.vector_repository = VectorRepository()
-        self.embedding_service= EmbeddingService()
+    embedding_service: EmbeddingService
+    vector_repository: VectorRepository
+    execution_debugger: ExecutionDebugger
 
+    def __init__(
+        self,
+        embedding_service: EmbeddingService,
+        vector_repository: VectorRepository,
+        execution_debugger: ExecutionDebugger
+    ) -> None:
+        """Initialize the ingestion service."""
+
+        self.embedding_service = embedding_service
+        self.vector_repository = vector_repository
+        self.execution_debugger = execution_debugger
 
 
     def ingest_document(
         self,
-        document:Document
-    ):
+        document: Document
+    ) -> None:
+        """Ingest a document into the knowledge base."""
 
         if self.vector_repository.document_exists(document.id):
             print(f"Skipping: {document.name} (already indexed)")
             return
-        # Step 1 - Read PDF
+
         pages = read_pdf(document.path)
 
+        chunks = chunk_text(
+            pages,
+            CHUNK_SIZE,
+            CHUNK_OVERLAP
+        )
 
-        # Step 2 - Split into chunks
-        chunks = chunk_text( pages, CHUNK_SIZE, CHUNK_OVERLAP)
-        
-        ChunkInspector.inspect(chunks)
-        
-        # Step 3 - Process each chunk
+        self.execution_debugger.chunks(
+            chunks
+        )
+
         for index, chunk in enumerate(chunks):
 
-            embedding = self.embedding_service.get_embedding(chunk.text)
+            embedding = self.embedding_service.get_embedding(
+                chunk.text
+            )
 
             metadata = {
                 "document_id": document.id,

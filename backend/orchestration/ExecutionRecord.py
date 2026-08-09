@@ -23,7 +23,6 @@ class ExecutionRecord:
     """One executed step."""
 
     step_name: str
-
+    status: str
     duration: float
-
-    successful: bool
+    message: str = ""

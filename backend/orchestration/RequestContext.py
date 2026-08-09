@@ -16,6 +16,8 @@ Does NOT:
 """
 
 from dataclasses import dataclass
+
+from chromadb.types import Where
 from backend.compliance.BusinessProfile import BusinessProfile
 
 
@@ -24,4 +26,4 @@ from backend.compliance.BusinessProfile import BusinessProfile
 class RequestContext:
     question: str
     business_profile: BusinessProfile
-    where: dict | None = None
+    where: Where | None = None

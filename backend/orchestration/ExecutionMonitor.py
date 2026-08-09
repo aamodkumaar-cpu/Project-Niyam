@@ -21,6 +21,7 @@ Does NOT:
 
 
 from time import perf_counter
+import time
 from backend.orchestration.ExecutionTrace import ExecutionTrace
 from backend.orchestration.ExecutionRecord import ExecutionRecord
 
@@ -46,23 +47,19 @@ class ExecutionMonitor:
 
 
     def finish_step(
-        self,
+    self,
         step_name: str,
         started_at: float
-    ) -> None:
-        """Record successful completion."""
+    ):
+        """Record successful execution."""
 
         duration = perf_counter() - started_at
-        self.execution_trace.records.append(
+        self.execution_trace.add(
             ExecutionRecord(
                 step_name=step_name,
-                duration=duration,
-                successful=True
+                status="SUCCESS",
+                duration=duration
             )
-        )
-
-        print(
-            f"✔ {step_name} ({duration:.2f}s)"
         )
 
 
@@ -70,21 +67,41 @@ class ExecutionMonitor:
         self,
         step_name: str,
         error: Exception
-    ) -> None:
+    ):
         """Record failed execution."""
-        self.execution_trace.records.append(
+
+        self.execution_trace.add(
             ExecutionRecord(
                 step_name=step_name,
-                duration=0.0,
-                successful=False
+                status="FAILED",
+                duration=0,
+                message=str(error)
             )
         )
-        print( f"✖ {step_name}: {error}"  )
+
+
+    def skip_step(
+        self,
+        step_name: str,
+        reason: str
+    ):
+        """Record skipped execution."""
+
+        self.execution_trace.add(
+            ExecutionRecord(
+                step_name=step_name,
+                status="SKIPPED",
+                duration=0,
+                message=reason
+            )
+        )
+
+
 
 
     def get_execution_trace(
         self
     ) -> ExecutionTrace:
-        """Return the execution trace."""
+        """Return execution trace."""
 
         return self.execution_trace

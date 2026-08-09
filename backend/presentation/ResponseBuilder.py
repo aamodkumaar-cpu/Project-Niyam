@@ -16,9 +16,11 @@ Does NOT:
     - Retrieve documents
 """
 
-from backend.compliance.ComplianceChecklist import ComplianceChecklist
+
 from backend.retrieval.KnowledgeSearchResult import KnowledgeSearchResult
 from backend.results.AnswerResult import AnswerResult
+from backend.tools.results.ComplianceChecklistResult import ComplianceChecklistResult
+from backend.tools.results.ToolResult import ToolResult
 
 
 class ResponseBuilder:
@@ -26,26 +28,27 @@ class ResponseBuilder:
 
     def build(
         self,
-        result
+        result: ToolResult
     ) -> AnswerResult:
-        """Convert a business result into an AnswerResult."""
-
-        if isinstance(result, ComplianceChecklist):
-
-            answer = "\n".join(
-                f"✓ {item.title}\n  {item.description}"
-                for item in result.items
-            )
+        """
+        Convert a ToolResult into an AnswerResult.
+        """
+        if isinstance(result, ComplianceChecklistResult):
+            checklist = result.checklist
             return AnswerResult(
-                answer=answer,
+                answer="\n".join(
+                    f"✓ {item.title}\n  {item.description}"
+                    for item in checklist.items
+                ),
                 sources=[]
             )
+
         if isinstance(result, KnowledgeSearchResult):
             return AnswerResult(
                 answer=result.answer,
                 sources=result.sources
             )
 
-        raise ValueError(
-            f"Unsupported response type: {type(result)}"
+        raise TypeError(
+            f"Unsupported ToolResult type: {type(result).__name__}"
         )

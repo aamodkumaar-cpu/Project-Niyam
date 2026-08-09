@@ -2,32 +2,34 @@
 Execution Result.
 
 Type:
-    Data Model (DTO)
+    Runtime Model
 
 Purpose:
-    Represents the complete outcome of executing an execution plan.
+    Represents the complete outcome of an execution.
 
 Responsibilities:
-    - Store the business result
-    - Store the execution trace
+    - Store the final answer
+    - Store execution trace
 
 Does NOT:
     - Execute workflow steps
-    - Perform business logic
-    - Transform results
 """
 
+from dataclasses import dataclass, field
 
-from dataclasses import dataclass
-from typing import Any
-
+from backend.results.AnswerResult import AnswerResult
 from backend.orchestration.ExecutionTrace import ExecutionTrace
+from backend.tools.results.ToolResult import ToolResult
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecutionResult:
-    """Represents the outcome of a workflow execution."""
 
-    result: Any
+    result: ToolResult
 
     trace: ExecutionTrace
+
+    answer: AnswerResult | None = field(
+        default=None,
+        init=False
+    )

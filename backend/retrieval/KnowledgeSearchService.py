@@ -8,92 +8,95 @@ Purpose:
     Executes the complete knowledge search workflow.
 
 Responsibilities:
-    - Retrieve relevant knowledge
-    - Build prompts
-    - Call the LLM
-    - Build an AnswerResult
+    - Retrieve knowledge
+    - Extract structured facts
+    - Generate the final answer
+    - Build a KnowledgeSearchResult
 
 Does NOT:
-    - Route requests
     - Detect intent
     - Execute tools
+    - Route requests
 """
 
-from backend.diagnostic.PromptInspector import PromptInspector
-from backend.diagnostic.RetrievalInspector import RetrievalInspector
-from backend.ingestion.EmbeddingService import EmbeddingService
-from backend.llm.OllamaService import OllamaService
-from backend.orchestration.RequestContext import RequestContext
-from backend.prompt.PromptBuilder import PromptBuilder
-from backend.retrieval.KeywordRetrievalService import KeywordRetrievalService
-from backend.retrieval.ResultMerger import ResultMerger
-from backend.retrieval.RetrievalService import RetrievalService
-from backend.retrieval.SemanticRetrievalService import SemanticRetrievalService
-from backend.retrieval.VectorRepository import VectorRepository
+from backend.diagnostic.ExecutionDebugger import ExecutionDebugger
+from backend.extraction.AnswerGenerator import AnswerGenerator
+from backend.extraction.KnowledgeExtractor import KnowledgeExtractor
+from backend.orchestration.ExecutionContext import ExecutionContext
 from backend.retrieval.KnowledgeSearchResult import KnowledgeSearchResult
+from backend.retrieval.RetrievalPipeline import RetrievalPipeline
 
 
 class KnowledgeSearchService:
-    """Performs the complete RAG workflow."""
+    """Executes the complete knowledge search workflow."""
 
-    def __init__(self):
+    execution_debugger: ExecutionDebugger
 
-        embedding_service = EmbeddingService()
-        vector_repository = VectorRepository()
+    retrieval_pipeline: RetrievalPipeline
+    knowledge_extractor: KnowledgeExtractor
+    answer_generator: AnswerGenerator
 
-        semantic_retrieval_service = SemanticRetrievalService(
-            embedding_service=embedding_service,
-            vector_repository=vector_repository
-        )
+    def __init__(
+        self,
+        retrieval_pipeline: RetrievalPipeline,
+        knowledge_extractor: KnowledgeExtractor,
+        answer_generator: AnswerGenerator,
+        execution_debugger: ExecutionDebugger,
 
-        keyword_retrieval_service = KeywordRetrievalService(
-            vector_repository=vector_repository
-        )
+    ) -> None:
 
-        result_merger = ResultMerger()
+        self.retrieval_pipeline = retrieval_pipeline
+        self.knowledge_extractor = knowledge_extractor
+        self.answer_generator = answer_generator
+        self.execution_debugger = execution_debugger
 
-        self.retrieval_service = RetrievalService(
-            semantic_retrieval_service=semantic_retrieval_service,
-            keyword_retrieval_service=keyword_retrieval_service,
-            result_merger=result_merger
-        )
 
-        self.prompt_builder = PromptBuilder()
-        self.ollama_service = OllamaService()
+
+#------------ END of init() ----------------
 
     def search(
         self,
-        context: RequestContext
+        context: ExecutionContext
     ) -> KnowledgeSearchResult:
-        """Execute knowledge search."""
 
-        knowledge_nodes = self.retrieval_service.retrieve(
-            question=context.question,
-            where=context.where
+        question = context.request.question
+
+        self.execution_debugger.question(
+            question
         )
 
-        RetrievalInspector.inspect(
-            context.question,
-            knowledge_nodes
+        knowledge_nodes = self.retrieval_pipeline.retrieve(
+            question=question,
+            where=context.request.where
         )
 
-        messages = self.prompt_builder.build(
-            question=context.question,
+        self.execution_debugger.retrieval(
+            question=question,
             knowledge_nodes=knowledge_nodes
         )
 
-        PromptInspector.inspect(messages)
-
-        answer = self.ollama_service.generate(
-            messages
+        structured_knowledge = self.knowledge_extractor.extract(
+            question=question,
+            knowledge_nodes=knowledge_nodes
         )
 
-        sources = [
-            node.metadata
-            for node in knowledge_nodes
-        ]
+        self.execution_debugger.extraction(
+            structured_knowledge
+        )
+
+        answer = self.answer_generator.generate(
+            question=question,
+            knowledge=structured_knowledge
+        )
+
+        self.execution_debugger.answer(
+            answer
+        )
 
         return KnowledgeSearchResult(
             answer=answer,
-            sources=sources
+            sources=[
+                node.metadata
+                for node in knowledge_nodes
+            ]
         )

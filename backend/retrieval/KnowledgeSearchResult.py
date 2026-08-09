@@ -19,10 +19,11 @@ Does NOT:
 
 from dataclasses import dataclass
 from backend.retrieval.DocumentMetadata import DocumentMetadata
+from backend.tools.results.ToolResult import ToolResult
 
 
 @dataclass
-class KnowledgeSearchResult:
+class KnowledgeSearchResult(ToolResult):
     """Represents a knowledge search result."""
 
     answer: str

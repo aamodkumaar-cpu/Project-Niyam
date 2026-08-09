@@ -1,76 +1,56 @@
 """
 Keyword Retrieval Service.
 
+Type:
+    Domain Service
+
 Purpose:
     Retrieves relevant knowledge using keyword matching.
 
 Responsibilities:
-    - Search chunks using keywords
-    - Rank matching chunks
-    - Return the best matching Knowledge Nodes
+    - Search indexed knowledge using keywords
+    - Return matching KnowledgeNode objects
+    - Support metadata filtering
 
 Does NOT:
     - Generate embeddings
-    - Perform vector search
+    - Perform semantic search
+    - Merge results
+    - Rank results
     - Build prompts
     - Call the LLM
 """
 
-from backend.retrieval.KeywordTokenizer import KeywordTokenizer
-from backend.retrieval.KnowledgeNode import KnowledgeNode
+from chromadb.types import Where
 
-class KeywordRetrievalService:
+from backend.retrieval.KnowledgeNode import KnowledgeNode
+from backend.retrieval.RetrievalStrategy import RetrievalStrategy
+from backend.retrieval.VectorRepository import VectorRepository
+
+
+class KeywordRetrievalService(RetrievalStrategy):
+    """Retrieves knowledge using keyword matching."""
+
+    vector_repository: VectorRepository
 
     def __init__(
         self,
-        vector_repository
-    ):
+        vector_repository: VectorRepository
+    ) -> None:
+        """Initialize the keyword retrieval service."""
 
         self.vector_repository = vector_repository
-        self.tokenizer = KeywordTokenizer()
 
     def retrieve(
         self,
         question: str,
-        top_k: int = 5
-    ):
-        keywords = self.tokenizer.tokenize(question)
-        knowledge_nodes = self.vector_repository.get_all_chunks()
-        scored_nodes = []
+        top_k: int = 5,
+        where: Where | None = None
+    ) -> list[KnowledgeNode]:
+        """Retrieve knowledge using keyword matching."""
 
-        for node in knowledge_nodes:
-            score = self._score_chunk(
-                keywords=keywords,
-                chunk=node
-            )
-
-            if score > 0:
-                scored_nodes.append(
-                    (
-                        score,
-                        node
-                    )
-                )
-        scored_nodes.sort(
-            key=lambda item: item[0],
-            reverse=True
+        return self.vector_repository.keyword_search(
+            question=question,
+            top_k=top_k,
+            where=where
         )
-        
-        return [
-            node
-            for _, node in scored_nodes[:top_k] #The underscore (_) is the Python convention for "this value exists, but I'm not using it."
-        ]
-
-
-    def _score_chunk(
-        self,
-        keywords: list[str],
-        chunk: KnowledgeNode
-    ) -> int:
-
-        content = chunk.content.lower()
-        score = 0
-        for keyword in keywords:
-            score += content.count(keyword)
-
-        return score

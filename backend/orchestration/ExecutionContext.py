@@ -19,11 +19,9 @@ Does NOT:
     - Store business logic
 """
 
-
 from dataclasses import dataclass
-from typing import Any
-
 from backend.orchestration.RequestContext import RequestContext
+from backend.tools.results.ToolResult import ToolResult
 
 
 @dataclass
@@ -31,5 +29,4 @@ class ExecutionContext:
     """Shared context for an execution workflow."""
 
     request: RequestContext
-    previous_result: Any = None
-    shared_data: dict[str, Any] | None = None
+    previous_result: ToolResult | None = None

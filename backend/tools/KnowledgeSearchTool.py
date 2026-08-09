@@ -16,26 +16,41 @@ Does NOT:
     - Call the LLM directly
 """
 
+from backend.orchestration.ExecutionContext import ExecutionContext
 from backend.orchestration.RequestContext import RequestContext
 from backend.retrieval.KnowledgeSearchService import KnowledgeSearchService
 from backend.retrieval.KnowledgeSearchResult import KnowledgeSearchResult
 from backend.tools.Tool import Tool
+from backend.orchestration.Capability import Capability
+from backend.tools.results.ToolResult import ToolResult
 
 
 class KnowledgeSearchTool(Tool):
-    """Knowledge search tool."""
+    """Executes knowledge search."""
 
-    def __init__(self):
-        """Initialize the tool."""
+    service: KnowledgeSearchService
 
-        self.service = KnowledgeSearchService()
+    def __init__(
+        self,
+        service: KnowledgeSearchService
+    ) -> None:
+        """Initialize the knowledge search tool."""
+        self.service = service
+
+#------------- END of init () -----------------
 
     def execute(
         self,
-        context: RequestContext
-    ) -> KnowledgeSearchResult:
+        context: ExecutionContext
+    ) -> ToolResult:
         """Execute the tool."""
 
         return self.service.search(
             context
         )
+
+    @property
+    def capability(self) -> Capability:
+        """Business capability implemented by this tool."""
+
+        return Capability.SEARCH_KNOWLEDGE

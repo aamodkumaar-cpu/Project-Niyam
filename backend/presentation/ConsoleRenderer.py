@@ -15,6 +15,7 @@ Does NOT:
     - Call the LLM
 """
 
+from backend.orchestration.ExecutionTrace import ExecutionTrace
 from backend.results.AnswerResult import AnswerResult
 
 
@@ -40,10 +41,10 @@ class ConsoleRenderer:
 
 
     @staticmethod
-    def render(
+    def render_answer(
         result: AnswerResult
     ):
-
+        """Render an answer."""
 
         print("\nAnswer")
         print("-" * 80)
@@ -54,15 +55,61 @@ class ConsoleRenderer:
         print("-" * 80)
 
         if not result.sources:
-            print("No sources identified..")
-        else:
-            for index, source in enumerate(result.sources, start=1):
-                print(
-                    f"{index}. "
-                    f"{source.source} "
-                    f"(Page {source.page_number})"
-                )
-        
-        print( "-" * 80)
-        print("\n")
+            print("No sources identified.")
 
+        else:
+
+            unique_sources = sorted(
+                {
+                    (
+                        source.source,
+                        source.page_number
+                    )
+                    for source in result.sources
+                }
+            )
+
+            for index, (document, page) in enumerate(
+                unique_sources,
+                start=1
+            ):
+                print(
+                    f"{index}. {document} (Page {page})"
+                )
+
+        print("-" * 80)
+        print()
+
+
+    @staticmethod
+    def render_execution_trace(
+        trace: ExecutionTrace
+    ):
+        """Render workflow execution."""
+
+        print("\nExecution Summary")
+        print("-" * 80)
+
+        for record in trace.records:
+
+            icon = {
+                "SUCCESS": "✔",
+                "FAILED": "✖",
+                "SKIPPED": "⏭"
+            }.get(
+                record.status,
+                "•"
+            )
+
+            print(
+                f"{icon} {record.step_name:<35}"
+                f" ({record.duration:.2f}s)"
+            )
+
+            if record.message:
+                print(
+                    f"    {record.message}"
+                )
+
+        print("-" * 80)
+        print()

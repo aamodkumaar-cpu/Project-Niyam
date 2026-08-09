@@ -6,22 +6,39 @@ The format follows Semantic Versioning.
 
 ---
 
-
-# Changelog
-
 ## [Unreleased]
 
+---
+
+## [v0.5.0] - 2026-07-31
+
 ### Added
-- Document model
-- DocumentCatalogRepository
-- DocumentService
-- Multi-document ingestion
-- Duplicate detection
-- Metadata filtering foundation
+- NiyamAgent orchestration layer
+- ExecutionPlanner
+- ExecutionPlan
+- ExecutionStep
+- ExecutionExecutor
+- ExecutionContext
+- ExecutionResult
+- ExecutionTrace
+- ExecutionMonitor
+- Tool abstraction
+- ToolRegistry
+- KnowledgeSearchTool
+- ComplianceChecklistTool
+- ResponseBuilder
+- ConversationMemory foundation
+- KnowledgeSearchService
+- KnowledgeSearchResult
 
-## [0.2.0]
-...
+### Changed
+- Refactored request processing into Agent → Planner → Executor → Tool pipeline
+- Knowledge search migrated to Tool-based architecture
+- Compliance checklist integrated into the execution pipeline
+- Added execution monitoring and tracing
+- Introduced workflow execution foundation for future multi-step plans
 
+---
 
 ## [v0.2.0] - 2026-07-15
 

@@ -13,27 +13,43 @@ Does NOT:
     - Call the LLM
 """
 
+from backend.orchestration.ExecutionContext import ExecutionContext
 from backend.tools.Tool import Tool
 from backend.compliance.ComplianceChecklistService import  ComplianceChecklistService
-from backend.orchestration.RequestContext import  RequestContext
+from backend.orchestration.Capability import Capability
+from backend.tools.results.ComplianceChecklistResult import ComplianceChecklistResult
+from backend.tools.results.ToolResult import ToolResult
 
 
 class ComplianceChecklistTool(Tool):
+    """Generates compliance checklists."""
+
+    service: ComplianceChecklistService
+
     def __init__(
-        self
-    ):
-        """Initialize the compliance checklist tool."""
+        self,
+        service: ComplianceChecklistService
+    ) -> None:
+        """Initialize the tool."""
 
-        self.service = ComplianceChecklistService()
+        self.service = service
 
-    
+    @property
+    def capability(self) -> Capability:
+        """Business capability implemented by this tool."""
+
+        return Capability.GENERATE_CHECKLIST
 
     def execute(
         self,
-        context: RequestContext
-    ):
+        context: ExecutionContext
+    ) -> ToolResult:
         """Execute the tool."""
 
-        return self.service.generate(
-            context.business_profile
+        checklist = self.service.generate(
+            context.request.business_profile
+        )
+
+        return ComplianceChecklistResult(
+            checklist
         )

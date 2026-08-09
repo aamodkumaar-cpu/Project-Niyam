@@ -2,29 +2,44 @@
 Tool.
 
 Purpose:
-    Represents an executable business capability.
+    Base abstraction for every executable capability in Project Niyam.
 
 Responsibilities:
-    - Execute one business action
+    - Expose the business capability implemented by the tool.
+    - Execute work using the supplied execution context.
 
 Does NOT:
-    - Route requests
-    - Call other tools
-    - Manage conversations
+    - Perform orchestration.
+    - Decide when it should execute.
+    - Register itself.
 """
 
-
 from abc import ABC, abstractmethod
-from typing import Any
+
+from backend.orchestration.ExecutionContext import ExecutionContext
+from backend.orchestration.Capability import Capability
+from backend.tools.results.ToolResult import ToolResult
 
 
 class Tool(ABC):
-    """Base class for all tools."""
+    """
+    Base class for all executable tools.
+    """
+
+    @property
+    @abstractmethod
+    def capability(self) -> Capability:
+        """
+        Business capability implemented by this tool.
+        """
+        pass
 
     @abstractmethod
     def execute(
         self,
-        context
-    ) -> Any:
-        """Execute the tool."""
-        raise NotImplementedError
+        context: ExecutionContext
+    )-> ToolResult:
+        """
+        Execute the capability.
+        """
+        pass
