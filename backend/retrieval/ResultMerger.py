@@ -2,20 +2,22 @@
 Result Merger.
 
 Type:
-    Retrieval Pipeline Component
+    Domain Service
 
 Purpose:
-    Merges knowledge retrieved from multiple retrieval strategies.
+    Merge retrieval results from multiple retrieval strategies into
+    one deterministic ranked result set.
 
 Responsibilities:
-    - Merge retrieval results.
-    - Remove duplicate knowledge nodes.
-    - Preserve retrieval order.
+    - Merge semantic and keyword retrieval results.
+    - Remove duplicate source chunks.
+    - Preserve the strongest score for duplicates.
+    - Rank results by descending relevance.
 
 Does NOT:
-    - Filter weak results.
-    - Rank results.
-    - Build prompts.
+    - Retrieve knowledge.
+    - Inspect document semantics.
+    - Apply domain-specific rules.
     - Call the LLM.
 """
 
@@ -23,32 +25,49 @@ from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class ResultMerger:
-    """Merges retrieval results from multiple strategies."""
+    """Merges and deterministically ranks retrieval results."""
 
     def merge(
         self,
-        existing_nodes: list[KnowledgeNode],
-        new_nodes: list[KnowledgeNode]
+        semantic_nodes: list[KnowledgeNode],
+        keyword_nodes: list[KnowledgeNode],
     ) -> list[KnowledgeNode]:
-        """
-        Merge newly retrieved knowledge with existing results.
-        """
+        """Merge, deduplicate, and rank retrieval results."""
 
-        merged: list[KnowledgeNode] = []
-        seen: set[tuple[str, int]] = set()
+        merged: dict[
+            tuple[str, int, int],
+            KnowledgeNode,
+        ] = {}
 
-        # Preserve existing order first, then append new results.
-        for node in [*existing_nodes, *new_nodes]:
+        for node in [
+            *semantic_nodes,
+            *keyword_nodes,
+        ]:
+            key = self._source_key(node)
 
-            key = (
-                node.metadata.document_id,
-                node.metadata.chunk_number
-            )
+            existing = merged.get(key)
 
-            if key in seen:
+            if existing is None:
+                merged[key] = node
                 continue
 
-            seen.add(key)
-            merged.append(node)
+            if node.score > existing.score:
+                merged[key] = node
 
-        return merged
+        return sorted(
+            merged.values(),
+            key=lambda node: node.score,
+            reverse=True,
+        )
+
+    def _source_key(
+        self,
+        node: KnowledgeNode,
+    ) -> tuple[str, int, int]:
+        """Return the stable identity of a retrieved chunk."""
+
+        return (
+            node.metadata.document_id,
+            node.metadata.page_number,
+            node.metadata.chunk_number,
+        )

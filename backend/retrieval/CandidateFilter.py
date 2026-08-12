@@ -5,107 +5,51 @@ Type:
     Domain Service
 
 Purpose:
-    Removes retrieval candidates that are clearly unrelated to the user's
-    question before prompt construction.
+    Remove retrieval results that have no meaningful retrieval signal.
 
 Responsibilities:
-    - Inspect retrieved knowledge
-    - Remove unrelated documents
-    - Preserve only relevant candidates
+    - Reject candidates with no retrieval relevance.
+    - Preserve positively scored candidates.
+    - Provide a generic retrieval-quality boundary.
 
 Does NOT:
-    - Retrieve knowledge
-    - Rank knowledge
-    - Build prompts
-    - Call the LLM
+    - Recognize document types.
+    - Recognize customers or companies.
+    - Inspect document names.
+    - Apply domain-specific keywords.
+    - Call the LLM.
 """
 
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class CandidateFilter:
-    """Filters unrelated retrieval candidates."""
+    """Filters retrieval candidates using retrieval score only."""
 
     def filter(
         self,
         question: str,
-        candidates: list[KnowledgeNode]
+        candidates: list[KnowledgeNode],
     ) -> list[KnowledgeNode]:
-        """Remove obviously unrelated documents."""
+        """Return candidates with a meaningful retrieval signal."""
+
+        _ = question
 
         if not candidates:
             return []
 
-        question = question.lower()
+        relevant = [
+            candidate
+            for candidate in candidates
+            if self._has_retrieval_signal(candidate)
+        ]
 
-        filtered: list[KnowledgeNode] = []
+        return relevant if relevant else candidates
 
-        for node in candidates:
-
-            source = node.metadata.source.lower()
-
-            if self._matches_resume(question):
-
-                if "amod" in source or "resume" in source:
-                    filtered.append(node)
-
-                continue
-
-            if self._matches_gst(question):
-
-                if "gst" in source:
-                    filtered.append(node)
-
-                continue
-
-            filtered.append(node)
-
-        return filtered if filtered else candidates
-
-    # ---------- Private ----------
-
-    def _matches_resume(
+    def _has_retrieval_signal(
         self,
-        question: str
+        candidate: KnowledgeNode,
     ) -> bool:
-        """Return True when the question is about the resume."""
+        """Return whether the candidate has a positive retrieval score."""
 
-        keywords = (
-            "amod",
-            "resume",
-            "experience",
-            "career",
-            "worked",
-            "company",
-            "companies",
-            "employment",
-            "job",
-            "profile"
-        )
-
-        return any(
-            keyword in question
-            for keyword in keywords
-        )
-
-    def _matches_gst(
-        self,
-        question: str
-    ) -> bool:
-        """Return True when the question is about GST."""
-
-        keywords = (
-            "gst",
-            "registration",
-            "tax",
-            "invoice",
-            "input tax",
-            "cgst",
-            "sgst",
-            "igst"
-        )
-
-        return any(
-            keyword in question
-            for keyword in keywords
-        )
+        return candidate.score > 0.0

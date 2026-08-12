@@ -5,9 +5,8 @@ Purpose:
     Defines the JSON contract expected from the knowledge extraction LLM.
 
 Responsibilities:
-    - Define the extraction JSON schema.
-    - Ensure the LLM returns atomic source-grounded facts.
-    - Keep the LLM output contract aligned with KnowledgeFactJson.
+    - Require the LLM to select deterministic source candidates.
+    - Prevent the LLM from generating source evidence.
 
 Does NOT:
     - Extract knowledge.
@@ -19,7 +18,7 @@ from typing import Any
 
 
 class KnowledgeSchema:
-    """Defines the JSON schema for knowledge extraction."""
+    """Defines the candidate-selection JSON schema."""
 
     def json_schema(self) -> dict[str, Any]:
         """Return the JSON schema expected from the extraction LLM."""
@@ -29,10 +28,7 @@ class KnowledgeSchema:
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                    },
-                    "source_quote": {
+                    "candidate_id": {
                         "type": "string",
                     },
                     "confidence": {
@@ -40,8 +36,7 @@ class KnowledgeSchema:
                     },
                 },
                 "required": [
-                    "name",
-                    "source_quote",
+                    "candidate_id",
                     "confidence",
                 ],
                 "additionalProperties": False,

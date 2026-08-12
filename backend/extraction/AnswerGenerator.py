@@ -5,46 +5,57 @@ Type:
     Domain Service
 
 Purpose:
-    Generate the final user-facing answer from structured knowledge.
+    Convert structured knowledge into a readable answer.
 
 Responsibilities:
-    - Render validated structured knowledge
-    - Preserve factual content exactly
+    - Render structured facts as readable bullet points.
+    - Group facts by source-owned heading.
+    - Keep source information out of individual bullets.
+    - Preserve factual wording.
 
 Does NOT:
-    - Retrieve knowledge
-    - Extract knowledge
-    - Call the LLM
-    - Invent or modify facts
+    - Retrieve knowledge.
+    - Generate facts.
+    - Modify factual meaning.
+    - Validate source grounding.
+    - Call the LLM.
 """
 
-from backend.extraction.StructuredKnowledge import StructuredKnowledge
+from backend.extraction.StructuredKnowledge import (
+    StructuredKnowledge,
+)
 
 
 class AnswerGenerator:
-    """Generates answers from validated structured knowledge."""
+    """Generate a readable answer from structured knowledge."""
 
     def generate(
         self,
         question: str,
-        knowledge: StructuredKnowledge
+        knowledge: StructuredKnowledge,
     ) -> str:
-        """Render the validated knowledge as a user-facing answer."""
+        """Generate the user-facing answer text."""
+
+        _ = question
 
         if not knowledge.facts:
-            return "The supplied knowledge does not contain the answer."
+            return (
+                "The supplied knowledge does not contain "
+                "the answer."
+            )
 
         lines: list[str] = [
-            "The following information was found in the supplied documents:",
-            ""
+            "The following information was found "
+            "in the supplied documents:",
+            "",
         ]
 
-        current_name: str | None = None
+        current_name = ""
 
         for fact in knowledge.facts:
 
             if fact.name != current_name:
-                if current_name is not None:
+                if current_name:
                     lines.append("")
 
                 lines.append(
@@ -53,8 +64,14 @@ class AnswerGenerator:
 
                 current_name = fact.name
 
-            lines.append(
-                f"- {fact.value}"
+            display_value = " ".join(
+                fact.value.split()
             )
 
-        return "\n".join(lines)
+            lines.append(
+                f"- {display_value}"
+            )
+
+        return "\n".join(
+            lines
+        )

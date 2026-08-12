@@ -5,461 +5,490 @@ Type:
     Domain Service
 
 Purpose:
-    Extract structured knowledge from retrieved context.
+    Select source-grounded knowledge from deterministic source candidates.
 
 Responsibilities:
-    - Build the extraction prompt.
-    - Invoke the LLM.
-    - Parse extracted JSON.
-    - Split compound facts into atomic facts.
-    - Validate extracted facts against retrieved context.
+    - Build deterministic source candidates.
+    - Ask the LLM which candidates answer the question.
+    - Parse candidate selections.
+    - Resolve selected IDs back to original source fragments.
+    - Enforce exhaustive-request coverage.
+    - Enforce explicit maximum facts per heading.
+    - Validate source grounding.
     - Produce StructuredKnowledge.
 
 Does NOT:
     - Retrieve knowledge.
+    - Generate source wording.
+    - Rewrite facts.
     - Answer user questions.
-    - Perform reasoning.
+    - Perform semantic similarity.
 """
 
 from __future__ import annotations
 
-import json
 import re
-from typing import cast
 
-from backend.diagnostic.ExecutionDebugger import ExecutionDebugger
-from backend.extraction.ExtractionPromptBuilder import ExtractionPromptBuilder
+from backend.diagnostic.ExecutionDebuggerContract import (
+    ExecutionDebuggerContract,
+)
+from backend.extraction.ExtractionCandidate import ExtractionCandidate
+from backend.extraction.ExtractionCandidateBuilder import (
+    ExtractionCandidateBuilder,
+)
+from backend.extraction.ExtractionPromptBuilder import (
+    ExtractionPromptBuilder,
+)
+from backend.extraction.ExtractionResponseParser import (
+    ExtractionResponseParser,
+    ExtractionSelection,
+)
 from backend.extraction.KnowledgeFact import KnowledgeFact
-from backend.extraction.KnowledgeFactJson import KnowledgeFactJson
 from backend.extraction.KnowledgeSchema import KnowledgeSchema
+from backend.extraction.SourceQuoteValidator import (
+    SourceQuoteValidator,
+)
 from backend.extraction.StructuredKnowledge import StructuredKnowledge
+from backend.llm.LLMClient import LLMClient
 from backend.llm.Message import Messages
-from backend.llm.OllamaService import OllamaService
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class KnowledgeExtractor:
-    """Extracts structured knowledge from retrieved context."""
-
-    prompt_builder: ExtractionPromptBuilder
-    ollama_service: OllamaService
-    execution_debugger: ExecutionDebugger
-    knowledge_schema: KnowledgeSchema
+    """Selects structured knowledge from deterministic source candidates."""
 
     def __init__(
         self,
         prompt_builder: ExtractionPromptBuilder,
-        ollama_service: OllamaService,
-        execution_debugger: ExecutionDebugger,
+        llm_client: LLMClient,
+        execution_debugger: ExecutionDebuggerContract,
         knowledge_schema: KnowledgeSchema,
+        source_quote_validator: SourceQuoteValidator,
+        response_parser: ExtractionResponseParser,
+        candidate_builder: ExtractionCandidateBuilder,
     ) -> None:
         """Initialize the knowledge extractor."""
 
         self.prompt_builder = prompt_builder
-        self.ollama_service = ollama_service
+        self.llm_client = llm_client
         self.execution_debugger = execution_debugger
         self.knowledge_schema = knowledge_schema
-
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
+        self.source_quote_validator = source_quote_validator
+        self.response_parser = response_parser
+        self.candidate_builder = candidate_builder
 
     def extract(
         self,
         question: str,
         knowledge_nodes: list[KnowledgeNode],
     ) -> StructuredKnowledge:
-        """Extract only facts grounded in retrieved context."""
+        """Select and return only source-grounded knowledge."""
+
+        candidates = self.candidate_builder.build(
+            knowledge_nodes
+        )
+
+        if not candidates:
+            return StructuredKnowledge()
 
         messages: Messages = self.prompt_builder.build(
             question=question,
-            knowledge_nodes=knowledge_nodes,
+            candidates=candidates,
         )
 
         self.execution_debugger.prompt(
             messages
         )
 
-        response = self.ollama_service.generate(
+        response = self.llm_client.generate(
             messages=messages,
             response_format=self.knowledge_schema.json_schema(),
         )
 
         self.execution_debugger.raw_llm_response(
-            title="Knowledge Extraction",
+            title="Knowledge Selection",
             response=response,
         )
 
-        structured_knowledge = self._parse(
-            response=response,
-            knowledge_nodes=knowledge_nodes,
-        )
-
-        self.execution_debugger.extraction(
-            structured_knowledge
-        )
-
-        return structured_knowledge
-
-    # ------------------------------------------------------------------
-    # Parsing
-    # ------------------------------------------------------------------
-
-    def _parse(
-        self,
-        response: str,
-        knowledge_nodes: list[KnowledgeNode],
-    ) -> StructuredKnowledge:
-        """Parse, split, and validate extracted knowledge."""
-
-        cleaned_response = self._clean_response(
+        selections = self.response_parser.parse(
             response
         )
 
-        data = cast(
-            list[KnowledgeFactJson],
-            json.loads(cleaned_response),
+        knowledge = self._build_structured_knowledge(
+            selections=selections,
+            candidates=candidates,
+            question=question,
         )
 
-        structured_knowledge = StructuredKnowledge()
+        self.execution_debugger.extraction(
+            knowledge
+        )
 
-        for item in data:
+        return knowledge
 
-            name = item["name"]
-            source_quote = item["source_quote"]
-            confidence = float(
-                item.get("confidence", 1.0)
+    def _build_structured_knowledge(
+        self,
+        selections: list[ExtractionSelection],
+        candidates: list[ExtractionCandidate],
+        question: str,
+    ) -> StructuredKnowledge:
+        """Resolve selected IDs and enforce deterministic constraints."""
+
+        candidate_map = {
+            candidate.candidate_id: candidate
+            for candidate in candidates
+        }
+
+        max_per_heading = (
+            self._extract_max_per_heading(
+                question
+            )
+        )
+
+        exhaustive = self._is_exhaustive_request(
+            question
+        )
+
+        knowledge = StructuredKnowledge()
+
+        selected_ids: set[str] = set()
+        heading_counts: dict[str, int] = {}
+
+        # --------------------------------------------------------------
+        # Phase 1:
+        # Accept valid LLM selections.
+        # --------------------------------------------------------------
+
+        for selection in selections:
+            candidate_id = selection["candidate_id"]
+
+            if candidate_id in selected_ids:
+                continue
+
+            candidate = candidate_map.get(
+                candidate_id
             )
 
-            atomic_quotes = self._split_into_atomic_facts(
-                source_quote
+            if candidate is None:
+                continue
+
+            heading = self._candidate_heading(
+                candidate
             )
 
-            for atomic_quote in atomic_quotes:
+            count = heading_counts.get(
+                heading,
+                0,
+            )
 
-                candidate = self._find_supporting_node(
-                    name=name,
-                    value=atomic_quote,
-                    knowledge_nodes=knowledge_nodes,
+            if (
+                max_per_heading is not None
+                and count >= max_per_heading
+            ):
+                continue
+
+            if self._is_ambiguous_candidate(
+                candidate=candidate,
+                candidates=candidates,
+            ):
+                self._reject(
+                    candidate=candidate,
+                    confidence=selection["confidence"],
+                )
+                continue
+
+            if not self.source_quote_validator.is_supported(
+                source_quote=candidate.source_quote,
+                source_text=candidate.node.content,
+            ):
+                self._reject(
+                    candidate=candidate,
+                    confidence=selection["confidence"],
+                )
+                continue
+
+            fact = KnowledgeFact(
+                name=heading,
+                value=candidate.source_quote,
+                source=candidate.node.metadata.source,
+                page_number=candidate.node.metadata.page_number,
+                confidence=selection["confidence"],
+            )
+
+            if self._is_duplicate(
+                fact=fact,
+                knowledge=knowledge,
+            ):
+                continue
+
+            knowledge.facts.append(
+                fact
+            )
+
+            selected_ids.add(
+                candidate_id
+            )
+
+            heading_counts[heading] = (
+                count + 1
+            )
+
+        # --------------------------------------------------------------
+        # Phase 2:
+        # Exhaustive requests are completed deterministically.
+        #
+        # The LLM can select relevant evidence, but it cannot make
+        # an "all/every/each" request incomplete.
+        # --------------------------------------------------------------
+
+        if exhaustive:
+            self._complete_exhaustive_selection(
+                candidates=candidates,
+                knowledge=knowledge,
+                selected_ids=selected_ids,
+                heading_counts=heading_counts,
+                max_per_heading=max_per_heading,
+            )
+
+        return knowledge
+
+    def _complete_exhaustive_selection(
+        self,
+        candidates: list[ExtractionCandidate],
+        knowledge: StructuredKnowledge,
+        selected_ids: set[str],
+        heading_counts: dict[str, int],
+        max_per_heading: int | None,
+    ) -> None:
+        """Complete every represented professional-experience heading."""
+
+        if max_per_heading is None:
+            return
+
+        experience_headings: list[str] = []
+
+        for candidate in candidates:
+            heading = self._candidate_heading(
+                candidate
+            )
+
+            if not heading:
+                continue
+
+            if not self._is_experience_heading(
+                heading
+            ):
+                continue
+
+            if heading not in experience_headings:
+                experience_headings.append(
+                    heading
                 )
 
-                if candidate is None:
-                    self.execution_debugger.rejected_fact(
-                        KnowledgeFact(
-                            name=name,
-                            value=atomic_quote,
-                            source="",
-                            page_number=0,
-                            confidence=confidence,
-                        )
+        for heading in experience_headings:
+            current_count = heading_counts.get(
+                heading,
+                0,
+            )
+
+            if current_count >= max_per_heading:
+                continue
+
+            for candidate in candidates:
+                if (
+                    self._candidate_heading(
+                        candidate
                     )
+                    != heading
+                ):
+                    continue
+
+                if (
+                    candidate.candidate_id
+                    in selected_ids
+                ):
+                    continue
+
+                if current_count >= max_per_heading:
+                    break
+
+                if self._is_ambiguous_candidate(
+                    candidate=candidate,
+                    candidates=candidates,
+                ):
+                    continue
+
+                if not self.source_quote_validator.is_supported(
+                    source_quote=candidate.source_quote,
+                    source_text=candidate.node.content,
+                ):
                     continue
 
                 fact = KnowledgeFact(
-                    name=name,
-                    value=atomic_quote,
-                    source=candidate.metadata.source,
-                    page_number=candidate.metadata.page_number,
-                    confidence=confidence,
+                    name=heading,
+                    value=candidate.source_quote,
+                    source=candidate.node.metadata.source,
+                    page_number=candidate.node.metadata.page_number,
+                    confidence=1.0,
                 )
 
                 if self._is_duplicate(
                     fact=fact,
-                    knowledge=structured_knowledge,
+                    knowledge=knowledge,
                 ):
+                    selected_ids.add(
+                        candidate.candidate_id
+                    )
                     continue
 
-                structured_knowledge.facts.append(
+                knowledge.facts.append(
                     fact
                 )
 
-        return structured_knowledge
+                selected_ids.add(
+                    candidate.candidate_id
+                )
 
-    # ------------------------------------------------------------------
-    # Atomic Fact Handling
-    # ------------------------------------------------------------------
+                current_count += 1
+                heading_counts[heading] = (
+                    current_count
+                )
 
-    def _split_into_atomic_facts(
+    def _is_exhaustive_request(
         self,
-        source_quote: str,
-    ) -> list[str]:
-        """Split a compound source quote into conservative atomic facts."""
+        question: str,
+    ) -> bool:
+        """Return whether the question requests broad coverage."""
 
-        normalized_quote = re.sub(
-            r"\s+",
-            " ",
-            source_quote,
-        ).strip()
+        normalized = question.lower()
 
-        if not normalized_quote:
-            return []
-
-        sentences = self._split_sentences(
-            normalized_quote
+        exhaustive_terms = (
+            "all ",
+            "all the ",
+            "each ",
+            "every ",
+            "from all ",
+            "from each ",
+            "from every ",
         )
 
-        atomic_facts: list[str] = []
+        return any(
+            term in normalized
+            for term in exhaustive_terms
+        )
 
-        for sentence in sentences:
+    def _extract_max_per_heading(
+        self,
+        question: str,
+    ) -> int | None:
+        """Extract an explicit maximum-per-heading constraint."""
 
-            clauses = self._split_independent_clauses(
-                sentence
+        patterns = (
+            r"\bmax(?:imum)?\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)",
+            r"\bup\s+to\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)",
+        )
+
+        for pattern in patterns:
+            match = re.search(
+                pattern,
+                question,
+                flags=re.IGNORECASE,
             )
 
-            atomic_facts.extend(
-                clause
-                for clause in clauses
-                if clause.strip()
-            )
-
-        return atomic_facts
-
-    def _split_sentences(
-        self,
-        text: str,
-    ) -> list[str]:
-        """Split text into sentence-level facts."""
-
-        sentences = re.split(
-            r"(?<=[.!?])\s+",
-            text,
-        )
-
-        return [
-            sentence.strip()
-            for sentence in sentences
-            if sentence.strip()
-        ]
-
-    def _split_independent_clauses(
-        self,
-        sentence: str,
-    ) -> list[str]:
-        """Split independently stated claims joined by conjunctions."""
-
-        pattern = (
-            r"\s+and\s+"
-            r"(?="
-            r"(?:"
-            r"built\b"
-            r"|led\b"
-            r"|reduced\b"
-            r"|launched\b"
-            r"|delivered\b"
-            r"|enabled\b"
-            r"|improved\b"
-            r"|increased\b"
-            r"|decreased\b"
-            r"|created\b"
-            r"|developed\b"
-            r"|filed\b"
-            r"|earned\b"
-            r"|achieved\b"
-            r"|\d"
-            r")"
-            r")"
-        )
-
-        clauses = re.split(
-            pattern,
-            sentence,
-            flags=re.IGNORECASE,
-        )
-
-        return [
-            clause.strip()
-            for clause in clauses
-            if clause.strip()
-        ]
-
-
-    # ------------------------------------------------------------------
-    # Grounding
-    # ------------------------------------------------------------------
-
-    def _find_supporting_node(
-        self,
-        name: str,
-        value: str,
-        knowledge_nodes: list[KnowledgeNode],
-    ) -> KnowledgeNode | None:
-        """Find a retrieved node where name and fact are locally supported."""
-
-        for node in knowledge_nodes:
-
-            if not self._name_is_supported(
-                name=name,
-                source_text=node.content,
-            ):
-                continue
-
-            if not self._value_is_supported(
-                value=value,
-                source_text=node.content,
-            ):
-                continue
-
-            if not self._facts_are_locally_associated(
-                name=name,
-                value=value,
-                source_text=node.content,
-            ):
-                continue
-
-            return node
+            if match is not None:
+                return int(
+                    match.group(1)
+                )
 
         return None
 
-    def _facts_are_locally_associated(
+    def _candidate_heading(
         self,
-        name: str,
-        value: str,
-        source_text: str,
-    ) -> bool:
-        """Verify that the name and fact occur within the same local section."""
-
-        normalized_source = re.sub(
-            r"\s+",
-            " ",
-            source_text.lower(),
-        )
-
-        normalized_name = re.sub(
-            r"\s+",
-            " ",
-            name.lower(),
-        ).strip()
-
-        normalized_value = re.sub(
-            r"\s+",
-            " ",
-            value.lower(),
-        ).strip()
-
-        name_position = normalized_source.find(
-            normalized_name
-        )
-
-        if name_position == -1:
-            return False
-
-        value_position = normalized_source.find(
-            normalized_value
-        )
-
-        if value_position == -1:
-            return False
-
-        distance = abs(
-            value_position - name_position
-        )
-
-        return distance <= 500
-
-    def _name_is_supported(
-        self,
-        name: str,
-        source_text: str,
-    ) -> bool:
-        """Verify that the extracted name appears in source text."""
-
-        name_tokens = self._tokens(
-            name
-        )
-
-        source_tokens = self._tokens(
-            source_text
-        )
-
-        if not name_tokens:
-            return False
-
-        matched_tokens = sum(
-            1
-            for token in name_tokens
-            if token in source_tokens
-        )
-
-        coverage = (
-            matched_tokens / len(name_tokens)
-        )
-
-        return coverage >= 0.80
-
-    def _value_is_supported(
-        self,
-        value: str,
-        source_text: str,
-    ) -> bool:
-        """Verify that the extracted fact is supported by source text."""
-
-        value_tokens = self._tokens(
-            value
-        )
-
-        source_tokens = self._tokens(
-            source_text
-        )
-
-        if not value_tokens:
-            return False
-
-        matched_tokens = sum(
-            1
-            for token in value_tokens
-            if token in source_tokens
-        )
-
-        coverage = (
-            matched_tokens / len(value_tokens)
-        )
-
-        return coverage >= 0.85
-
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
-
-    def _clean_response(
-        self,
-        response: str,
+        candidate: ExtractionCandidate,
     ) -> str:
-        """Remove optional markdown fences from an LLM response."""
+        """Return the candidate's structural heading."""
 
-        cleaned_response = response.strip()
+        heading = candidate.heading.strip()
 
-        if not cleaned_response.startswith("```"):
-            return cleaned_response
+        if heading:
+            return heading
 
-        lines = cleaned_response.splitlines()
+        return candidate.node.metadata.source
 
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-
-        return "\n".join(lines).strip()
-
-    def _tokens(
+    def _is_experience_heading(
         self,
-        text: str,
-    ) -> set[str]:
-        """Normalize text into comparison tokens."""
+        heading: str,
+    ) -> bool:
+        """Return whether a heading represents professional experience."""
 
-        return set(
-            re.findall(
-                r"[a-z0-9]+",
-                text.lower(),
-            )
+        value = " ".join(
+            heading.split()
+        ).strip()
+
+        if not value:
+            return False
+
+        upper = value.upper()
+
+        if "EARLY CAREER" in upper:
+            return True
+
+        if "(" not in value:
+            return False
+
+        if ")" not in value:
+            return False
+
+        if not re.search(
+            r"\b(?:19|20)\d{2}\b",
+            value,
+        ):
+            return False
+
+        excluded = (
+            "EDUCATION",
+            "CERTIFICATION",
+            "CERTIFICATIONS",
         )
+
+        return not any(
+            item in upper
+            for item in excluded
+        )
+
+    def _is_ambiguous_candidate(
+        self,
+        candidate: ExtractionCandidate,
+        candidates: list[ExtractionCandidate],
+    ) -> bool:
+        """Return whether identical evidence exists at multiple locations."""
+
+        normalized_quote = " ".join(
+            candidate.source_quote.split()
+        )
+
+        identities = {
+            (
+                other.node.metadata.document_id,
+                other.node.metadata.page_number,
+                other.node.metadata.chunk_number,
+            )
+            for other in candidates
+            if " ".join(
+                other.source_quote.split()
+            ) == normalized_quote
+        }
+
+        return len(identities) > 1
 
     def _is_duplicate(
         self,
         fact: KnowledgeFact,
         knowledge: StructuredKnowledge,
     ) -> bool:
-        """Check whether an equivalent fact was already extracted."""
+        """Return whether an equivalent source fact is already present."""
 
         return any(
             existing.name == fact.name
@@ -467,4 +496,23 @@ class KnowledgeExtractor:
             and existing.source == fact.source
             and existing.page_number == fact.page_number
             for existing in knowledge.facts
+        )
+
+    def _reject(
+        self,
+        candidate: ExtractionCandidate,
+        confidence: float,
+    ) -> None:
+        """Record a rejected candidate for diagnostics."""
+
+        self.execution_debugger.rejected_fact(
+            KnowledgeFact(
+                name=self._candidate_heading(
+                    candidate
+                ),
+                value=candidate.source_quote,
+                source=candidate.node.metadata.source,
+                page_number=candidate.node.metadata.page_number,
+                confidence=confidence,
+            )
         )

@@ -5,343 +5,316 @@ Type:
     Domain Service
 
 Purpose:
-    Build a strict prompt for extracting atomic, source-grounded facts.
+    Build a strict candidate-selection prompt for source-grounded
+    knowledge extraction.
 
 Responsibilities:
-    - Assemble extraction instructions.
-    - Provide retrieved context to the LLM.
-    - Define atomic fact boundaries.
-    - Require source-faithful extraction.
-    - Prevent unsupported relationships between facts.
+    - Provide the user question.
+    - Provide deterministic candidate IDs and source facts.
+    - Instruct the LLM to select candidate IDs only.
+    - Explicitly handle exhaustive requests such as "all companies".
+    - Explicitly handle maximum-per-heading requests.
 
 Does NOT:
     - Retrieve knowledge.
     - Call the LLM.
-    - Validate extracted facts.
-    - Answer user questions.
+    - Validate candidates.
+    - Generate source quotes.
+    - Generate factual content.
 """
 
+from __future__ import annotations
+
+import re
+
+from backend.extraction.ExtractionCandidate import (
+    ExtractionCandidate,
+)
 from backend.llm.Message import Messages
-from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class ExtractionPromptBuilder:
-    """Builds prompts for source-grounded knowledge extraction."""
+    """Builds candidate-selection prompts."""
 
     def build(
         self,
         question: str,
-        knowledge_nodes: list[KnowledgeNode],
+        candidates: list[ExtractionCandidate],
     ) -> Messages:
-        """Build a strict extraction prompt from retrieved knowledge."""
+        """Build a prompt that asks the LLM to select candidate IDs only."""
 
-        context = ""
-
-        for node in knowledge_nodes:
-            context += (
-                f"Source : {node.metadata.source}\n"
-                f"Page   : {node.metadata.page_number}\n"
-                "\n"
-                f"{node.content}\n"
-                "----------------------------------------\n"
+        context = "\n\n".join(
+            (
+                f"[{candidate.candidate_id}]\n"
+                f"Source : {candidate.node.metadata.source}\n"
+                f"Page   : {candidate.node.metadata.page_number}\n"
+                f"Heading: {candidate.heading}\n"
+                f"Fact   : {candidate.source_quote}"
             )
+            for candidate in candidates
+        )
 
-        system_prompt = """
-You are the knowledge extraction component of Project Niyam.
+        maximum = self._extract_maximum_per_heading(
+            question
+        )
 
-Your ONLY job is to identify factual knowledge explicitly stated
-in the supplied context.
+        exhaustive = self._is_exhaustive_request(
+            question
+        )
 
-The supplied context is the ONLY source of truth.
+        coverage_instruction = self._build_coverage_instruction(
+            exhaustive=exhaustive,
+            maximum=maximum,
+        )
 
-============================================================
-1. SOURCE FIDELITY
-============================================================
+        system_prompt = f"""
+You are the knowledge selection component of Project Niyam.
 
-Every extracted fact MUST come directly from the supplied context.
+The supplied candidates are the ONLY source of truth.
 
-DO NOT:
+Your ONLY job is to select candidate IDs whose source facts directly
+answer the user question.
 
-- summarize
-- paraphrase
-- rewrite
-- interpret
-- infer
-- assume
-- generalize
-- improve wording
-- add information
-- remove factual meaning
-- create relationships between facts
+You MUST NOT generate factual content.
 
-The source wording is authoritative.
+You MUST NOT write, rewrite, paraphrase, summarize, or modify source text.
 
-The "source_quote" field MUST contain wording copied directly
-from the supplied context.
+You MUST NOT create company names, headings, facts, explanations,
+relationships, or source quotes.
 
-Only minimal punctuation may be added when necessary.
+The application will resolve selected candidate IDs back to the
+original source text.
 
 ============================================================
-2. ATOMIC FACTS
+SELECTION RULES
 ============================================================
 
-Each independently stated claim MUST be returned as a separate
-JSON object.
+1. Return ONLY candidate IDs that exist in the supplied candidates.
 
-Example source:
+2. Select candidates whose FACT directly answers the user question.
 
-"Built OCI services and reduced patch requests by 80%."
+3. Do not select candidates merely because they are semantically
+   related.
 
-Return TWO facts:
+4. Do not infer facts from a candidate heading.
 
-[
-  {
-    "name": "Software Development Manager, Oracle",
-    "source_quote": "Built OCI services.",
-    "confidence": 1.0
-  },
-  {
-    "name": "Software Development Manager, Oracle",
-    "source_quote": "reduced patch requests by 80%.",
-    "confidence": 1.0
-  }
-]
+5. Do not combine multiple candidates.
 
-Do NOT return:
+6. Do not rewrite candidate text.
 
-[
-  {
-    "name": "Software Development Manager, Oracle",
-    "source_quote": "Built OCI services reducing patch requests by 80%.",
-    "confidence": 1.0
-  }
-]
+7. Every selected candidate must independently answer the question.
 
-The second version incorrectly creates a causal relationship.
+8. Career highlights, certifications, education, and unrelated
+   information must not be selected when the question specifically
+   asks for company experience.
+
+9. A candidate must remain associated with its supplied heading
+   and source.
+
+10. Never invent a candidate ID.
+
+11. If no candidate directly answers the question, return [].
 
 ============================================================
-3. NEVER CREATE RELATIONSHIPS
+EXHAUSTIVE REQUEST HANDLING
 ============================================================
 
-Do NOT create relationships between separate facts.
-
-Never introduce:
-
-- causality
-- dependency
-- attribution
-- chronology
-- correlation
-- ownership
-- explanation
-- consequence
-
-unless that relationship is explicitly stated in the source.
-
-Do NOT introduce wording such as:
-
-- therefore
-- thereby
-- resulting in
-- which reduced
-- which improved
-- which increased
-- enabling
-- because of
-- due to
-- leading to
-- as a result
-- resulting from
-
-unless those words or that relationship are explicitly present
-in the source.
+{coverage_instruction}
 
 ============================================================
-4. COMPANY AND ROLE BOUNDARIES
+IMPORTANT
 ============================================================
 
-Every company or role heading is a HARD boundary.
+For an exhaustive request, DO NOT stop after finding one or two
+relevant headings.
 
-A fact belonging to one company MUST NOT be assigned to another
-company.
+First inspect the COMPLETE candidate list.
 
-Preserve the company or role heading in the "name" field.
+Identify every heading that represents a relevant company or
+professional experience.
 
-Example:
+Then select the appropriate candidate facts for EACH such heading.
 
-Senior Engineering Manager, Cloudera
+The word "all" means ALL relevant represented headings, not merely
+the most relevant headings.
 
-- Led 25+ engineers.
-- Built RAG-based AI support assistant.
-- Reduced cluster bootstrap time by 60%.
-
-Senior Engineering Manager, CDK Global
-
-- Delivered greenfield SaaS platform.
-
-The Cloudera facts MUST remain attached to Cloudera.
-
-The CDK Global fact MUST remain attached to CDK Global.
+Do not select education, certification, career-highlight, or unrelated
+document candidates merely to satisfy the requested count.
 
 ============================================================
-5. CAREER HIGHLIGHTS
-============================================================
-
-Career Highlights are NOT automatically associated with a company.
-
-For example:
-
-Career Highlight:
-"Reduced deployment time by 60%."
-
-Do NOT assign this fact to Cloudera, Oracle, CDK Global,
-Sonehaat.com, or any other company unless the source explicitly
-associates it with that company.
-
-============================================================
-6. SOURCE QUOTE REQUIREMENT
-============================================================
-
-The "source_quote" MUST be a direct quote from the supplied
-context.
-
-The source quote must represent ONE atomic fact.
-
-Do NOT generate a new sentence that merely means the same thing.
-
-For example, if the source says:
-
-"Led AI-powered customer engagement platforms."
-
-The correct source_quote is:
-
-"Led AI-powered customer engagement platforms."
-
-NOT:
-
-"Managed AI customer engagement solutions."
-
-The second version is a paraphrase and MUST NOT be returned.
-
-============================================================
-7. SPLIT MULTIPLE FACTS
-============================================================
-
-If a source contains multiple independently stated claims,
-return each claim separately.
-
-Example:
-
-"Led Oracle Cloud PaaS services. Filed and Earned a US patent.
-Built OCI services and reduced patch requests by 80%."
-
-Return four atomic facts:
-
-1. "Led Oracle Cloud PaaS services."
-2. "Filed and Earned a US patent."
-3. "Built OCI services."
-4. "reduced patch requests by 80%."
-
-Do NOT combine them.
-
-============================================================
-8. REQUESTED NUMBER OF FACTS
-============================================================
-
-If the user asks for two facts from a company:
-
-- Return two facts if two facts are explicitly present.
-- Return one fact if only one fact is explicitly present.
-- Return zero facts if no fact is explicitly present.
-
-NEVER invent a fact to satisfy the requested number.
-
-============================================================
-9. EARLY CAREER
-============================================================
-
-If multiple companies are listed under an Early Career section
-but the achievements are shared across that section, do NOT assign
-those achievements individually to each company.
-
-Preserve the Early Career boundary.
-
-============================================================
-10. DUPLICATES
-============================================================
-
-Do not return duplicate facts.
-
-============================================================
-11. USER QUESTION
-============================================================
-
-The user question determines WHAT information is relevant.
-
-The retrieved context determines WHETHER the information is
-supported.
-
-The user question is NOT a source of factual information.
-
-============================================================
-12. OUTPUT CONTRACT
+OUTPUT
 ============================================================
 
 Return ONLY valid JSON.
 
 Return a JSON array.
 
-Every item MUST contain exactly these fields:
+Every item MUST contain exactly:
 
-{
-  "name": "<company or role>",
-  "source_quote": "<exact source wording for one atomic fact>",
+{{
+  "candidate_id": "<existing candidate ID>",
   "confidence": 1.0
-}
+}}
 
-Do NOT return:
-
-- Markdown
+Do not return:
+- source text
+- facts
+- names
+- headings
 - explanations
-- code fences
-- introductory text
-- concluding text
+- markdown
 - additional fields
-
-============================================================
-FINAL RULE
-============================================================
-
-When in doubt:
-
-DO NOT invent.
-
-DO NOT paraphrase.
-
-DO NOT combine.
-
-DO NOT infer.
-
-COPY THE FACT FROM THE SOURCE.
 """
 
-        user_prompt = (
-            "USER QUESTION\n"
-            "============\n\n"
-            f"{question}\n\n"
-            "RETRIEVED CONTEXT\n"
-            "=================\n\n"
-            "The following context is the ONLY source of truth.\n\n"
-            f"{context}"
-        )
+        user_prompt = f"""
+USER QUESTION
+=============
+
+{question}
+
+CANDIDATES
+==========
+
+{context}
+
+Select only candidate IDs that directly answer the question.
+"""
 
         return [
             {
                 "role": "system",
-                "content": system_prompt,
+                "content": system_prompt.strip(),
             },
             {
                 "role": "user",
-                "content": user_prompt,
+                "content": user_prompt.strip(),
             },
         ]
+
+    def _build_coverage_instruction(
+        self,
+        exhaustive: bool,
+        maximum: int | None,
+    ) -> str:
+        """Build explicit coverage instructions for the request."""
+
+        if not exhaustive:
+            if maximum is None:
+                return """
+This is NOT explicitly an exhaustive request.
+
+Select all candidates that directly answer the question, subject
+to the other selection rules.
+""".strip()
+
+            return f"""
+The question requests a maximum of {maximum} candidate facts per
+heading.
+
+Select no more than {maximum} candidates for the same heading.
+
+Do not invent candidates when fewer supported facts exist.
+""".strip()
+
+        if maximum is None:
+            return """
+This is an EXHAUSTIVE request.
+
+The user explicitly asks for ALL relevant companies or experience.
+
+Process the candidates heading-by-heading.
+
+For every heading that explicitly represents a company or professional
+experience relevant to the question:
+
+1. Select every candidate that directly answers the question.
+
+2. Do not stop after selecting candidates from the first company.
+
+3. Continue until every relevant company/experience heading in the
+   COMPLETE candidate list has been considered.
+
+4. Do not select candidates from unrelated headings.
+
+The final selection must provide coverage across ALL relevant
+represented companies.
+""".strip()
+
+        return f"""
+This is an EXHAUSTIVE request with a maximum of {maximum} facts
+per heading.
+
+Process the candidates heading-by-heading.
+
+For EVERY heading that explicitly represents a relevant company or
+professional experience:
+
+1. Consider all candidates belonging to that heading.
+
+2. Select up to {maximum} candidates that directly answer the
+   question.
+
+3. If the heading has fewer than {maximum} relevant candidates,
+   select only the available relevant candidates.
+
+4. Do NOT stop after the first company.
+
+5. Continue until EVERY relevant company/experience heading in the
+   COMPLETE candidate list has been considered.
+
+6. Do NOT select unrelated career highlights, certifications,
+   education, or unrelated documents.
+
+The final selection must therefore contain coverage from every
+relevant represented company, subject to the maximum of
+{maximum} candidates per heading.
+""".strip()
+
+    def _is_exhaustive_request(
+        self,
+        question: str,
+    ) -> bool:
+        """Return whether the question requests exhaustive coverage."""
+
+        normalized = question.lower()
+
+        exhaustive_terms = (
+            "all ",
+            "all the ",
+            "each ",
+            "every ",
+            "entire ",
+            "complete ",
+        )
+
+        return any(
+            term in normalized
+            for term in exhaustive_terms
+        )
+
+    def _extract_maximum_per_heading(
+        self,
+        question: str,
+    ) -> int | None:
+        """Extract an explicit maximum-per-heading request."""
+
+        match = re.search(
+            r"\bmax(?:imum)?\s+(\d+)\b",
+            question,
+            flags=re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        try:
+            maximum = int(
+                match.group(1)
+            )
+        except ValueError:
+            return None
+
+        if maximum <= 0:
+            return None
+
+        return maximum

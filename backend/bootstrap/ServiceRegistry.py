@@ -24,6 +24,8 @@ from backend.agent.NiyamAgent import NiyamAgent
 from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.config.settings import DOCUMENTS_DIR
 from backend.extraction.AnswerGenerator import AnswerGenerator
+from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
+from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
 from backend.ingestion.DocumentService import DocumentService
 from backend.ingestion.IngestionService import IngestionService
@@ -58,11 +60,11 @@ from backend.intents.IntentClassifier import IntentClassifier
 from backend.retrieval.CandidateFilter import CandidateFilter
 from backend.extraction.KnowledgeExtractor import KnowledgeExtractor
 from backend.extraction.ExtractionPromptBuilder import ExtractionPromptBuilder
+from backend.extraction.ExtractionCandidateBuilder import ExtractionCandidateBuilder
 from backend.extraction.KnowledgeSchema import KnowledgeSchema
 from backend.diagnostic.ConsoleLogger import ConsoleLogger
 from backend.diagnostic.ExecutionDebugger import ExecutionDebugger
 from backend.diagnostic.LogLevel import LogLevel
-
 
 
 class ServiceRegistry:
@@ -70,7 +72,6 @@ class ServiceRegistry:
 
     logger: ConsoleLogger
     execution_debugger: ExecutionDebugger
-
 
     knowledge_extractor: KnowledgeExtractor
     candidate_filter: CandidateFilter
@@ -104,7 +105,7 @@ class ServiceRegistry:
     document_repository: DocumentCatalogRepository
     document_service: DocumentService
     ingestion_service: IngestionService
-
+    context_assembler: ContextAssembler
 
     def __init__(self) -> None:
         """Create the complete application object graph."""
@@ -120,18 +121,8 @@ class ServiceRegistry:
         self._create_agent()
         self._create_router()
 
-    # ---------- Private ----------
-
     def _create_infrastructure(self) -> None:
         """Create shared infrastructure services."""
-
-        # ---------------------------------------------------------
-        # Core Infrastructure
-        # ---------------------------------------------------------
-
-        self.embedding_service = EmbeddingService()
-        self.vector_repository = VectorRepository()
-        self.context_organizer = ContextOrganizer()
 
         self.logger = ConsoleLogger(
             level=LogLevel.DEBUG
@@ -141,28 +132,39 @@ class ServiceRegistry:
             logger=self.logger
         )
 
-        self.ollama_service = OllamaService()
+        self.embedding_service = EmbeddingService()
 
-        # ---------------------------------------------------------
-        # Knowledge Extraction
-        # ---------------------------------------------------------
+        self.vector_repository = VectorRepository()
+
+        self.context_organizer = ContextOrganizer()
+
+        self.context_assembler = ContextAssembler(
+            context_organizer=self.context_organizer
+        )
+
+        self.ollama_service = OllamaService()
 
         knowledge_schema = KnowledgeSchema()
 
         extraction_prompt_builder = ExtractionPromptBuilder()
 
+        source_quote_validator = SourceQuoteValidator()
+
+        response_parser = ExtractionResponseParser()
+
+        candidate_builder = ExtractionCandidateBuilder()
+
         self.knowledge_extractor = KnowledgeExtractor(
             prompt_builder=extraction_prompt_builder,
-            ollama_service=self.ollama_service,
+            llm_client=self.ollama_service,
             execution_debugger=self.execution_debugger,
             knowledge_schema=knowledge_schema,
+            source_quote_validator=source_quote_validator,
+            response_parser=response_parser,
+            candidate_builder=candidate_builder,
         )
 
         self.answer_generator = AnswerGenerator()
-
-        # ---------------------------------------------------------
-        # Execution Infrastructure
-        # ---------------------------------------------------------
 
         self.execution_monitor = ExecutionMonitor()
 
@@ -174,10 +176,6 @@ class ServiceRegistry:
 
         self.conversation_memory = ConversationMemory()
 
-        # ---------------------------------------------------------
-        # Domain Services
-        # ---------------------------------------------------------
-
         self.answer_formatter_service = AnswerFormatterService()
 
         self.compliance_checklist_service = ComplianceChecklistService()
@@ -185,8 +183,6 @@ class ServiceRegistry:
         self.business_profile_session = BusinessProfileSession()
 
         self.candidate_filter = CandidateFilter()
-
-
 
     def _create_retrieval(self) -> None:
         """Create the retrieval pipeline."""
@@ -199,6 +195,7 @@ class ServiceRegistry:
         keyword_retrieval_service = KeywordRetrievalService(
             vector_repository=self.vector_repository
         )
+
         retrieval_strategies: list[RetrievalStrategy] = [
             semantic_retrieval_service,
             keyword_retrieval_service
@@ -222,7 +219,6 @@ class ServiceRegistry:
             candidate_filter=self.candidate_filter
         )
 
-
     def _create_services(self) -> None:
         """Create domain services."""
 
@@ -232,7 +228,6 @@ class ServiceRegistry:
             answer_generator=self.answer_generator,
             execution_debugger=self.execution_debugger
         )
-
 
     def _register_tools(self) -> None:
         """Register all application tools."""
@@ -255,7 +250,6 @@ class ServiceRegistry:
             )
         )
 
-
     def _create_execution(self) -> None:
         """Create the execution layer."""
 
@@ -263,7 +257,6 @@ class ServiceRegistry:
             tool_registry=self.tool_registry,
             execution_monitor=self.execution_monitor
         )
-
 
     def _create_agent(self) -> None:
         """Create the Niyam agent."""
@@ -276,7 +269,6 @@ class ServiceRegistry:
             conversation_memory=self.conversation_memory
         )
 
-
     def _create_router(self) -> None:
         """Create the request router."""
 
@@ -284,7 +276,6 @@ class ServiceRegistry:
             business_profile_session=self.business_profile_session,
             agent=self.niyam_agent
         )
-
 
     def _create_ingestion(self) -> None:
         """Create ingestion services."""
