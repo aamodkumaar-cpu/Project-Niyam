@@ -5,101 +5,55 @@ Type:
     Domain Service
 
 Purpose:
-    Removes obviously irrelevant knowledge nodes before
-    prompt construction.
+    Remove retrieved knowledge that is below the configured
+    relevance boundary.
 
 Responsibilities:
-    - Inspect retrieved knowledge
-    - Remove low-relevance knowledge
-    - Return filtered knowledge
+    - Apply a generic relevance threshold.
+    - Preserve the ordering established by ranking.
+    - Return only sufficiently relevant knowledge nodes.
 
 Does NOT:
-    - Retrieve knowledge
-    - Rank knowledge
-    - Build prompts
-    - Call the LLM
+    - Understand business domains.
+    - Interpret the user question.
+    - Know about resumes, companies, policies, or documents.
+    - Modify knowledge nodes.
+    - Call the LLM.
+    - Perform retrieval or ranking.
 """
 
-from typing import Final
+from __future__ import annotations
 
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class RelevanceFilter:
-    """Filters retrieved knowledge."""
+    """Filters ranked knowledge using a generic relevance boundary."""
 
-    _STOP_WORDS: Final[frozenset[str]] = frozenset({
-        "the",
-        "and",
-        "for",
-        "with",
-        "from",
-        "into",
-        "this",
-        "that",
-        "what",
-        "when",
-        "where",
-        "which",
-        "who",
-        "how",
-        "your",
-        "their",
-        "only",
-        "list",
-        "show",
-        "share",
-        "help",
-        "give",
-        "tell",
-        "please",
-        "maximum",
-        "company",
-        "companies",
-        "worked",
-        "work",
-        "all"
-    })
+    def __init__(
+        self,
+        minimum_score: float,
+    ) -> None:
+        """Initialize the relevance filter."""
+
+        self.minimum_score = minimum_score
 
     def filter(
         self,
-        question: str,
-        knowledge_nodes: list[KnowledgeNode]
+        candidates: list[KnowledgeNode],
     ) -> list[KnowledgeNode]:
-        """
-        Remove obviously irrelevant knowledge.
-        """
+        """Return candidates whose score meets the relevance boundary."""
 
-        if not knowledge_nodes:
-            return []
+        return [
+            candidate
+            for candidate in candidates
+            if self._is_relevant(candidate)
+        ]
 
-        question_words = {
-            word.lower()
-            for word in question.split()
-            if (
-                len(word) >= 3
-                and word.lower() not in self._STOP_WORDS
-            )
-        }
+    def _is_relevant(
+        self,
+        candidate: KnowledgeNode,
+    ) -> bool:
+        """Return whether a candidate meets the relevance boundary."""
 
-        filtered_nodes: list[KnowledgeNode] = []
-
-        for node in knowledge_nodes:
-
-            content = node.content.lower()
-
-            match_count = sum(
-                1
-                for word in question_words
-                if word in content
-            )
-
-            if match_count >= 2:
-                filtered_nodes.append(node)
-
-        # Never return an empty list because of
-        # aggressive filtering.
-        if filtered_nodes:
-            return filtered_nodes
-
-        return knowledge_nodes
+        return candidate.score >= self.minimum_score

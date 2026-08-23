@@ -12,13 +12,15 @@ Responsibilities:
     - Ask the LLM which candidates answer the question.
     - Parse candidate selections.
     - Resolve selected IDs back to original source fragments.
-    - Enforce exhaustive-request coverage.
+    - Enforce exhaustive request coverage.
     - Enforce explicit maximum facts per heading.
     - Validate source grounding.
     - Produce StructuredKnowledge.
 
 Does NOT:
     - Retrieve knowledge.
+    - Contain domain-specific business rules.
+    - Interpret resumes, companies, vendors, or other domain entities.
     - Generate source wording.
     - Rewrite facts.
     - Answer user questions.
@@ -32,7 +34,9 @@ import re
 from backend.diagnostic.ExecutionDebuggerContract import (
     ExecutionDebuggerContract,
 )
-from backend.extraction.ExtractionCandidate import ExtractionCandidate
+from backend.extraction.ExtractionCandidate import (
+    ExtractionCandidate,
+)
 from backend.extraction.ExtractionCandidateBuilder import (
     ExtractionCandidateBuilder,
 )
@@ -43,15 +47,27 @@ from backend.extraction.ExtractionResponseParser import (
     ExtractionResponseParser,
     ExtractionSelection,
 )
-from backend.extraction.KnowledgeFact import KnowledgeFact
-from backend.extraction.KnowledgeSchema import KnowledgeSchema
+from backend.extraction.KnowledgeFact import (
+    KnowledgeFact,
+)
+from backend.extraction.KnowledgeSchema import (
+    KnowledgeSchema,
+)
 from backend.extraction.SourceQuoteValidator import (
     SourceQuoteValidator,
 )
-from backend.extraction.StructuredKnowledge import StructuredKnowledge
-from backend.llm.LLMClient import LLMClient
-from backend.llm.Message import Messages
-from backend.retrieval.KnowledgeNode import KnowledgeNode
+from backend.extraction.StructuredKnowledge import (
+    StructuredKnowledge,
+)
+from backend.llm.LLMClient import (
+    LLMClient,
+)
+from backend.llm.Message import (
+    Messages,
+)
+from backend.retrieval.KnowledgeNode import (
+    KnowledgeNode,
+)
 
 
 class KnowledgeExtractor:
@@ -77,6 +93,8 @@ class KnowledgeExtractor:
         self.response_parser = response_parser
         self.candidate_builder = candidate_builder
 
+
+
     def extract(
         self,
         question: str,
@@ -84,8 +102,13 @@ class KnowledgeExtractor:
     ) -> StructuredKnowledge:
         """Select and return only source-grounded knowledge."""
 
+        relationship = self.prompt_builder._is_relationship_question(
+            question
+        )
+
         candidates = self.candidate_builder.build(
-            knowledge_nodes
+            knowledge_nodes,
+            relationship=relationship,
         )
 
         if not candidates:
@@ -114,6 +137,18 @@ class KnowledgeExtractor:
             response
         )
 
+        # ZERO-SELECTION means there is no source-supported answer.
+        # Do not allow any downstream component to fall back to
+        # retrieved-but-unselected knowledge.
+        if not selections:
+            knowledge = StructuredKnowledge()
+
+            self.execution_debugger.extraction(
+                knowledge
+            )
+
+            return knowledge
+
         knowledge = self._build_structured_knowledge(
             selections=selections,
             candidates=candidates,
@@ -126,23 +161,23 @@ class KnowledgeExtractor:
 
         return knowledge
 
+
+
     def _build_structured_knowledge(
         self,
         selections: list[ExtractionSelection],
         candidates: list[ExtractionCandidate],
         question: str,
     ) -> StructuredKnowledge:
-        """Resolve selected IDs and enforce deterministic constraints."""
+        """Resolve selections and enforce deterministic extraction constraints."""
 
         candidate_map = {
             candidate.candidate_id: candidate
             for candidate in candidates
         }
 
-        max_per_heading = (
-            self._extract_max_per_heading(
-                question
-            )
+        maximum = self._extract_max_per_heading(
+            question
         )
 
         exhaustive = self._is_exhaustive_request(
@@ -154,10 +189,38 @@ class KnowledgeExtractor:
         selected_ids: set[str] = set()
         heading_counts: dict[str, int] = {}
 
-        # --------------------------------------------------------------
-        # Phase 1:
-        # Accept valid LLM selections.
-        # --------------------------------------------------------------
+        self._accept_llm_selections(
+            selections=selections,
+            candidates=candidates,
+            candidate_map=candidate_map,
+            knowledge=knowledge,
+            selected_ids=selected_ids,
+            heading_counts=heading_counts,
+            maximum=maximum,
+        )
+
+        if exhaustive:
+            self._complete_exhaustive_selection(
+                candidates=candidates,
+                knowledge=knowledge,
+                selected_ids=selected_ids,
+                heading_counts=heading_counts,
+                maximum=maximum,
+            )
+
+        return knowledge
+
+    def _accept_llm_selections(
+        self,
+        selections: list[ExtractionSelection],
+        candidates: list[ExtractionCandidate],
+        candidate_map: dict[str, ExtractionCandidate],
+        knowledge: StructuredKnowledge,
+        selected_ids: set[str],
+        heading_counts: dict[str, int],
+        maximum: int | None,
+    ) -> None:
+        """Accept valid candidates selected by the LLM."""
 
         for selection in selections:
             candidate_id = selection["candidate_id"]
@@ -182,8 +245,8 @@ class KnowledgeExtractor:
             )
 
             if (
-                max_per_heading is not None
-                and count >= max_per_heading
+                maximum is not None
+                and count >= maximum
             ):
                 continue
 
@@ -207,11 +270,8 @@ class KnowledgeExtractor:
                 )
                 continue
 
-            fact = KnowledgeFact(
-                name=heading,
-                value=candidate.source_quote,
-                source=candidate.node.metadata.source,
-                page_number=candidate.node.metadata.page_number,
+            fact = self._create_fact(
+                candidate=candidate,
                 confidence=selection["confidence"],
             )
 
@@ -233,65 +293,38 @@ class KnowledgeExtractor:
                 count + 1
             )
 
-        # --------------------------------------------------------------
-        # Phase 2:
-        # Exhaustive requests are completed deterministically.
-        #
-        # The LLM can select relevant evidence, but it cannot make
-        # an "all/every/each" request incomplete.
-        # --------------------------------------------------------------
-
-        if exhaustive:
-            self._complete_exhaustive_selection(
-                candidates=candidates,
-                knowledge=knowledge,
-                selected_ids=selected_ids,
-                heading_counts=heading_counts,
-                max_per_heading=max_per_heading,
-            )
-
-        return knowledge
-
     def _complete_exhaustive_selection(
         self,
         candidates: list[ExtractionCandidate],
         knowledge: StructuredKnowledge,
         selected_ids: set[str],
         heading_counts: dict[str, int],
-        max_per_heading: int | None,
+        maximum: int | None,
     ) -> None:
-        """Complete every represented professional-experience heading."""
+        """Complete exhaustive requests across every represented heading."""
 
-        if max_per_heading is None:
-            return
-
-        experience_headings: list[str] = []
+        headings: list[str] = []
 
         for candidate in candidates:
             heading = self._candidate_heading(
                 candidate
             )
 
-            if not heading:
-                continue
-
-            if not self._is_experience_heading(
-                heading
-            ):
-                continue
-
-            if heading not in experience_headings:
-                experience_headings.append(
+            if heading not in headings:
+                headings.append(
                     heading
                 )
 
-        for heading in experience_headings:
+        for heading in headings:
             current_count = heading_counts.get(
                 heading,
                 0,
             )
 
-            if current_count >= max_per_heading:
+            if (
+                maximum is not None
+                and current_count >= maximum
+            ):
                 continue
 
             for candidate in candidates:
@@ -309,7 +342,10 @@ class KnowledgeExtractor:
                 ):
                     continue
 
-                if current_count >= max_per_heading:
+                if (
+                    maximum is not None
+                    and current_count >= maximum
+                ):
                     break
 
                 if self._is_ambiguous_candidate(
@@ -324,11 +360,8 @@ class KnowledgeExtractor:
                 ):
                     continue
 
-                fact = KnowledgeFact(
-                    name=heading,
-                    value=candidate.source_quote,
-                    source=candidate.node.metadata.source,
-                    page_number=candidate.node.metadata.page_number,
+                fact = self._create_fact(
+                    candidate=candidate,
                     confidence=1.0,
                 )
 
@@ -354,11 +387,58 @@ class KnowledgeExtractor:
                     current_count
                 )
 
+    def _create_fact(
+        self,
+        candidate: ExtractionCandidate,
+        confidence: float,
+    ) -> KnowledgeFact:
+        """Create a source-grounded knowledge fact from a candidate."""
+
+        return KnowledgeFact(
+            name=self._candidate_heading(
+                candidate
+            ),
+            value=candidate.source_quote,
+            source=candidate.node.metadata.source,
+            page_number=candidate.node.metadata.page_number,
+            confidence=confidence,
+        )
+
+    def _extract_max_per_heading(
+        self,
+        question: str,
+    ) -> int | None:
+        """Extract an explicit maximum-per-heading constraint."""
+
+        patterns = (
+            r"\b(?:only|exactly)\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)\b",
+            r"\b(?:max(?:imum)?|up\s+to)\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)\b",
+        )
+
+        for pattern in patterns:
+            match = re.search(
+                pattern,
+                question,
+                flags=re.IGNORECASE,
+            )
+
+            if match is not None:
+                maximum = int(
+                    match.group(1)
+                )
+
+                if maximum > 0:
+                    return maximum
+
+        return None
+
     def _is_exhaustive_request(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question requests broad coverage."""
+        """Return whether the question requests exhaustive coverage."""
 
         normalized = question.lower()
 
@@ -377,33 +457,6 @@ class KnowledgeExtractor:
             for term in exhaustive_terms
         )
 
-    def _extract_max_per_heading(
-        self,
-        question: str,
-    ) -> int | None:
-        """Extract an explicit maximum-per-heading constraint."""
-
-        patterns = (
-            r"\bmax(?:imum)?\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)",
-            r"\bup\s+to\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)",
-        )
-
-        for pattern in patterns:
-            match = re.search(
-                pattern,
-                question,
-                flags=re.IGNORECASE,
-            )
-
-            if match is not None:
-                return int(
-                    match.group(1)
-                )
-
-        return None
-
     def _candidate_heading(
         self,
         candidate: ExtractionCandidate,
@@ -416,47 +469,6 @@ class KnowledgeExtractor:
             return heading
 
         return candidate.node.metadata.source
-
-    def _is_experience_heading(
-        self,
-        heading: str,
-    ) -> bool:
-        """Return whether a heading represents professional experience."""
-
-        value = " ".join(
-            heading.split()
-        ).strip()
-
-        if not value:
-            return False
-
-        upper = value.upper()
-
-        if "EARLY CAREER" in upper:
-            return True
-
-        if "(" not in value:
-            return False
-
-        if ")" not in value:
-            return False
-
-        if not re.search(
-            r"\b(?:19|20)\d{2}\b",
-            value,
-        ):
-            return False
-
-        excluded = (
-            "EDUCATION",
-            "CERTIFICATION",
-            "CERTIFICATIONS",
-        )
-
-        return not any(
-            item in upper
-            for item in excluded
-        )
 
     def _is_ambiguous_candidate(
         self,

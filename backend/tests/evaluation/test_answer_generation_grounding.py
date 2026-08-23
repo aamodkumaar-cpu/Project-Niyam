@@ -18,15 +18,81 @@ Responsibilities:
 Does NOT:
     - Retrieve knowledge.
     - Extract knowledge.
-    - Call an LLM.
     - Depend on Ollama.
     - Test a specific customer or document.
 """
 
-
 from backend.extraction.AnswerGenerator import AnswerGenerator
+from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
 from backend.extraction.KnowledgeFact import KnowledgeFact
 from backend.extraction.StructuredKnowledge import StructuredKnowledge
+
+
+class _TestAnswerLlmClient:
+    """Provide deterministic LLM responses for answer-generation tests."""
+
+    def generate(
+        self,
+        messages,
+        response_format=None,
+    ) -> str:
+        """Generate a deterministic grounded answer from the prompt."""
+
+        user_prompt = messages[-1]["content"]
+
+        if "No supported facts are available." in user_prompt:
+            return (
+                "The supplied knowledge does not contain "
+                "the answer."
+            )
+
+        facts: list[tuple[str, str]] = []
+
+        current_company = ""
+
+        for line in user_prompt.splitlines():
+            if line.startswith("Company/Role: "):
+                current_company = line.removeprefix(
+                    "Company/Role: "
+                )
+
+            elif line.startswith("Value: "):
+                value = line.removeprefix(
+                    "Value: "
+                )
+
+                facts.append(
+                    (
+                        current_company,
+                        value,
+                    )
+                )
+
+        if not facts:
+            return (
+                "The supplied knowledge does not contain "
+                "the answer."
+            )
+
+        lines: list[str] = []
+        current_company = ""
+
+        for company, value in facts:
+            if company != current_company:
+                if current_company:
+                    lines.append("")
+
+                lines.append(
+                    f"{company}:"
+                )
+
+                current_company = company
+
+            lines.append(
+                f"- {value}"
+            )
+
+        return "\n".join(lines)
 
 
 def _create_knowledge(
@@ -37,7 +103,6 @@ def _create_knowledge(
     knowledge = StructuredKnowledge()
 
     for name, value, source, page_number in facts:
-
         knowledge.facts.append(
             KnowledgeFact(
                 name=name,
@@ -49,6 +114,15 @@ def _create_knowledge(
         )
 
     return knowledge
+
+
+def _create_generator() -> AnswerGenerator:
+    """Create an answer generator with a deterministic test LLM."""
+
+    return AnswerGenerator(
+        prompt_builder=AnswerPromptBuilder(),
+        llm_client=_TestAnswerLlmClient(),
+    )
 
 
 def test_validated_facts_are_rendered() -> None:
@@ -71,7 +145,7 @@ def test_validated_facts_are_rendered() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -81,18 +155,18 @@ def test_validated_facts_are_rendered() -> None:
     assert "Company A:" in answer
 
     assert (
-        "- Built a billing platform."
+        "Built a billing platform."
         in answer
     )
 
     assert (
-        "- Reduced processing time by 40%."
+        "Reduced processing time by 40%."
         in answer
     )
 
 
-def test_source_information_is_rendered() -> None:
-    """Ensure source metadata remains visible in the final answer."""
+def test_source_information_is_not_rendered_in_answer() -> None:
+    """Ensure source metadata is not repeated in the final answer."""
 
     knowledge = _create_knowledge(
         facts=[
@@ -105,7 +179,7 @@ def test_source_information_is_rendered() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -113,8 +187,18 @@ def test_source_information_is_rendered() -> None:
     )
 
     assert (
-        "Source: company-a.pdf, Page 2"
+        "Built a billing platform."
         in answer
+    )
+
+    assert (
+        "Source: company-a.pdf"
+        not in answer
+    )
+
+    assert (
+        "Page 2"
+        not in answer
     )
 
 
@@ -138,7 +222,7 @@ def test_independent_facts_remain_independent() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -146,7 +230,7 @@ def test_independent_facts_remain_independent() -> None:
     )
 
     assert (
-        "- Built a billing platform reducing processing time by 40%."
+        "Built a billing platform reducing processing time by 40%."
         not in answer
     )
 
@@ -170,7 +254,7 @@ def test_answer_contains_only_validated_facts() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -194,7 +278,7 @@ def test_answer_contains_only_validated_facts() -> None:
 
 
 def test_source_metadata_remains_attached_to_each_fact() -> None:
-    """Ensure each fact keeps its own source and page metadata."""
+    """Ensure source metadata remains attached to each fact internally."""
 
     knowledge = _create_knowledge(
         facts=[
@@ -213,7 +297,7 @@ def test_source_metadata_remains_attached_to_each_fact() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -221,16 +305,36 @@ def test_source_metadata_remains_attached_to_each_fact() -> None:
     )
 
     assert (
-        "- Built a billing platform.\n"
-        "  Source: company-a.pdf, Page 4"
+        "Built a billing platform."
         in answer
     )
 
     assert (
-        "- Reduced processing time by 40%.\n"
-        "  Source: company-b.pdf, Page 7"
+        "Reduced processing time by 40%."
         in answer
     )
+
+    assert (
+        knowledge.facts[0].source
+        == "company-a.pdf"
+    )
+
+    assert (
+        knowledge.facts[0].page_number
+        == 4
+    )
+
+    assert (
+        knowledge.facts[1].source
+        == "company-b.pdf"
+    )
+
+    assert (
+        knowledge.facts[1].page_number
+        == 7
+    )
+
+    assert "Source:" not in answer
 
 
 def test_question_information_cannot_become_answer_fact() -> None:
@@ -247,7 +351,7 @@ def test_question_information_cannot_become_answer_fact() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question=(
@@ -282,7 +386,7 @@ def test_facts_are_not_paraphrased() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -290,12 +394,12 @@ def test_facts_are_not_paraphrased() -> None:
     )
 
     assert (
-        "- Built a billing platform."
+        "Built a billing platform."
         in answer
     )
 
     assert (
-        "- Developed a billing system."
+        "Developed a billing system."
         not in answer
     )
 
@@ -314,7 +418,7 @@ def test_facts_are_not_enriched_with_invented_details() -> None:
         ],
     )
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",
@@ -322,7 +426,7 @@ def test_facts_are_not_enriched_with_invented_details() -> None:
     )
 
     assert (
-        "- Built a billing platform."
+        "Built a billing platform."
         in answer
     )
 
@@ -347,7 +451,7 @@ def test_empty_knowledge_produces_safe_response() -> None:
 
     knowledge = StructuredKnowledge()
 
-    generator = AnswerGenerator()
+    generator = _create_generator()
 
     answer = generator.generate(
         question="What did Company A accomplish?",

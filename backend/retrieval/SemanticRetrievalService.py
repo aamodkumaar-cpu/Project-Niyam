@@ -40,7 +40,7 @@ class  SemanticRetrievalService(RetrievalStrategy):
     def retrieve(
         self,
         question: str,
-        top_k: int = 5,
+        top_k: int = 10,
         where: Where | None = None
     ) -> list[KnowledgeNode]:
         """Retrieve relevant knowledge using semantic search."""

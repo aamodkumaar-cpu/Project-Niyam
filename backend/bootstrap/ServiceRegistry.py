@@ -24,6 +24,7 @@ from backend.agent.NiyamAgent import NiyamAgent
 from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.config.settings import DOCUMENTS_DIR
 from backend.extraction.AnswerGenerator import AnswerGenerator
+from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
 from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
 from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
@@ -36,9 +37,12 @@ from backend.prompt.ContextAssembler import ContextAssembler
 from backend.prompt.ContextOrganizer import ContextOrganizer
 from backend.retrieval.KeywordRankingStrategy import KeywordRankingStrategy
 from backend.retrieval.KeywordRetrievalService import KeywordRetrievalService
+from backend.retrieval.KeywordScorer import KeywordScorer
+from backend.retrieval.KeywordTokenizer import KeywordTokenizer
 from backend.retrieval.KnowledgeSearchService import KnowledgeSearchService
 from backend.retrieval.QuestionNormalizer import QuestionNormalizer
 from backend.retrieval.RankingStrategy import RankingStrategy
+from backend.retrieval.RelevanceFilter import RelevanceFilter
 from backend.retrieval.ResultMerger import ResultMerger
 from backend.retrieval.RetrievalPipeline import RetrievalPipeline
 from backend.retrieval.RetrievalService import RetrievalService
@@ -78,6 +82,10 @@ class ServiceRegistry:
     tool_registry: ToolRegistry
     embedding_service: EmbeddingService
     vector_repository: VectorRepository
+
+    keyword_tokenizer: KeywordTokenizer
+    keyword_scorer: KeywordScorer
+
     context_organizer: ContextOrganizer
 
     business_profile_session: BusinessProfileSession
@@ -121,6 +129,8 @@ class ServiceRegistry:
         self._create_agent()
         self._create_router()
 
+
+
     def _create_infrastructure(self) -> None:
         """Create shared infrastructure services."""
 
@@ -134,7 +144,13 @@ class ServiceRegistry:
 
         self.embedding_service = EmbeddingService()
 
-        self.vector_repository = VectorRepository()
+        self.keyword_tokenizer = KeywordTokenizer()
+        self.keyword_scorer = KeywordScorer()
+
+        self.vector_repository = VectorRepository(
+            keyword_tokenizer=self.keyword_tokenizer,
+            keyword_scorer=self.keyword_scorer,
+        )
 
         self.context_organizer = ContextOrganizer()
 
@@ -164,7 +180,10 @@ class ServiceRegistry:
             candidate_builder=candidate_builder,
         )
 
-        self.answer_generator = AnswerGenerator()
+        self.answer_generator = AnswerGenerator(
+                prompt_builder=AnswerPromptBuilder(),
+                llm_client=self.ollama_service,
+            )
 
         self.execution_monitor = ExecutionMonitor()
 
@@ -184,31 +203,39 @@ class ServiceRegistry:
 
         self.candidate_filter = CandidateFilter()
 
+
+
     def _create_retrieval(self) -> None:
         """Create the retrieval pipeline."""
 
         semantic_retrieval_service = SemanticRetrievalService(
             embedding_service=self.embedding_service,
-            vector_repository=self.vector_repository
+            vector_repository=self.vector_repository,
         )
 
         keyword_retrieval_service = KeywordRetrievalService(
-            vector_repository=self.vector_repository
+            vector_repository=self.vector_repository,
         )
 
         retrieval_strategies: list[RetrievalStrategy] = [
             semantic_retrieval_service,
-            keyword_retrieval_service
+            keyword_retrieval_service,
         ]
 
         ranking_strategies: list[RankingStrategy] = [
-            KeywordRankingStrategy()
+            KeywordRankingStrategy(
+                keyword_tokenizer=self.keyword_tokenizer,
+                keyword_scorer=self.keyword_scorer,
+            ),
         ]
+
+        relevance_filter = RelevanceFilter(minimum_score=0.0,)
 
         retrieval_service = RetrievalService(
             retrieval_strategies=retrieval_strategies,
             ranking_strategies=ranking_strategies,
-            result_merger=ResultMerger()
+            result_merger=ResultMerger(),
+            relevance_filter=relevance_filter,
         )
 
         question_normalizer = QuestionNormalizer()
@@ -216,8 +243,12 @@ class ServiceRegistry:
         self.retrieval_pipeline = RetrievalPipeline(
             retrieval_service=retrieval_service,
             question_normalizer=question_normalizer,
-            candidate_filter=self.candidate_filter
+            candidate_filter=self.candidate_filter,
         )
+
+
+
+
 
     def _create_services(self) -> None:
         """Create domain services."""

@@ -10,7 +10,7 @@ Purpose:
 Responsibilities:
     - Render structured facts as readable bullet points.
     - Group facts by source-owned heading.
-    - Keep source information out of individual bullets.
+    - Preserve source metadata with each fact.
     - Preserve factual wording.
 
 Does NOT:
@@ -21,22 +21,55 @@ Does NOT:
     - Call the LLM.
 """
 
-from backend.extraction.StructuredKnowledge import (
-    StructuredKnowledge,
-)
+from __future__ import annotations
+
+from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+from backend.extraction.StructuredKnowledge import StructuredKnowledge
+from backend.llm.Message import Messages
+from backend.llm.OllamaService import OllamaService
 
 
 class AnswerGenerator:
-    """Generate a readable answer from structured knowledge."""
+    """
+    Generate grounded user-facing answers from structured knowledge.
+
+    Type:
+        Domain Service
+
+    Purpose:
+        Convert validated StructuredKnowledge into a concise,
+        source-grounded answer using the LLM.
+
+    Responsibilities:
+        - Build grounded answer-generation prompts.
+        - Pass only validated knowledge to the LLM.
+        - Generate the final user-facing answer.
+        - Return the deterministic fallback when no knowledge exists.
+
+    Does NOT:
+        - Retrieve knowledge.
+        - Select source candidates.
+        - Validate source evidence.
+        - Invent facts.
+        - Perform independent knowledge discovery.
+    """
+
+    def __init__(
+        self,
+        prompt_builder: AnswerPromptBuilder,
+        llm_client: OllamaService,
+    ) -> None:
+        """Initialize the answer generator."""
+
+        self.prompt_builder = prompt_builder
+        self.llm_client = llm_client
 
     def generate(
         self,
         question: str,
         knowledge: StructuredKnowledge,
     ) -> str:
-        """Generate the user-facing answer text."""
-
-        _ = question
+        """Generate the grounded user-facing answer."""
 
         if not knowledge.facts:
             return (
@@ -44,34 +77,11 @@ class AnswerGenerator:
                 "the answer."
             )
 
-        lines: list[str] = [
-            "The following information was found "
-            "in the supplied documents:",
-            "",
-        ]
+        messages = self.prompt_builder.build(
+            question=question,
+            knowledge=knowledge,
+        )
 
-        current_name = ""
-
-        for fact in knowledge.facts:
-
-            if fact.name != current_name:
-                if current_name:
-                    lines.append("")
-
-                lines.append(
-                    f"{fact.name}:"
-                )
-
-                current_name = fact.name
-
-            display_value = " ".join(
-                fact.value.split()
-            )
-
-            lines.append(
-                f"- {display_value}"
-            )
-
-        return "\n".join(
-            lines
+        return self.llm_client.generate(
+            messages=messages,
         )

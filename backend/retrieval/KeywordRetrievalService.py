@@ -9,6 +9,7 @@ Purpose:
 
 Responsibilities:
     - Search indexed knowledge using keywords
+    - Retrieve a sufficiently broad candidate set for hybrid ranking
     - Return matching KnowledgeNode objects
     - Support metadata filtering
 
@@ -31,6 +32,8 @@ from backend.retrieval.VectorRepository import VectorRepository
 class KeywordRetrievalService(RetrievalStrategy):
     """Retrieves knowledge using keyword matching."""
 
+    _DEFAULT_TOP_K: int = 20
+
     vector_repository: VectorRepository
 
     def __init__(
@@ -44,10 +47,10 @@ class KeywordRetrievalService(RetrievalStrategy):
     def retrieve(
         self,
         question: str,
-        top_k: int = 5,
+        top_k: int = _DEFAULT_TOP_K,
         where: Where | None = None
     ) -> list[KnowledgeNode]:
-        """Retrieve knowledge using keyword matching."""
+        """Retrieve a broad keyword candidate set for hybrid ranking."""
 
         return self.vector_repository.keyword_search(
             question=question,

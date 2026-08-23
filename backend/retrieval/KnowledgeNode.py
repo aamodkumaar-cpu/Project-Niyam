@@ -5,11 +5,12 @@ Type:
     Domain Model
 
 Purpose:
-    Represents one retrieved knowledge chunk together with its retrieval metadata.
+    Represents one retrieved knowledge chunk together with its retrieval signals.
 
 Responsibilities:
     - Store chunk content.
-    - Store retrieval score.
+    - Store semantic distance when available.
+    - Store keyword relevance when available.
     - Store document metadata.
 
 Does NOT:
@@ -31,3 +32,5 @@ class KnowledgeNode:
     content: str
     score: float
     metadata: DocumentMetadata
+    keyword_score: float = 0.0
+    semantic_distance: float | None = None

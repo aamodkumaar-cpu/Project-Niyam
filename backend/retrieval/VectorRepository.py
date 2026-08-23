@@ -10,6 +10,7 @@ Purpose:
 Responsibilities:
     - Store document embeddings.
     - Perform semantic similarity search.
+    - Perform keyword search.
     - Retrieve indexed chunks.
     - Map Chroma records into domain objects.
 
@@ -21,11 +22,13 @@ Does NOT:
 """
 
 
+import re
+
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
-from chromadb.types import Where
 from chromadb.types import Metadata
+from chromadb.types import Where
 
 from backend.config.settings import (
     CHROMA_DB_PATH,
@@ -33,6 +36,8 @@ from backend.config.settings import (
 )
 from backend.ingestion.KnowledgeDomain import KnowledgeDomain
 from backend.retrieval.DocumentMetadata import DocumentMetadata
+from backend.retrieval.KeywordScorer import KeywordScorer
+from backend.retrieval.KeywordTokenizer import KeywordTokenizer
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
@@ -83,14 +88,54 @@ def _coerce_int(
 # Repository
 # ---------------------------------------------------------------------
 
-
 class VectorRepository:
     """Provides persistence operations for the vector database."""
 
+    _KEYWORD_STOP_WORDS: frozenset[str] = frozenset({
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "with",
+        "each",
+        "other",
+        "associated",
+    })
+
     client: ClientAPI
     collection: Collection
+    keyword_tokenizer: KeywordTokenizer
+    keyword_scorer: KeywordScorer
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        keyword_tokenizer: KeywordTokenizer,
+        keyword_scorer: KeywordScorer,
+    ) -> None:
         """Initialize the Chroma collection."""
 
         self.client = chromadb.PersistentClient(
@@ -100,6 +145,9 @@ class VectorRepository:
         self.collection = self.client.get_or_create_collection(
             name=VECTOR_COLLECTION
         )
+
+        self.keyword_tokenizer = keyword_tokenizer
+        self.keyword_scorer = keyword_scorer
 
     # -----------------------------------------------------------------
     # Public API
@@ -142,11 +190,20 @@ class VectorRepository:
         if not documents or not metadatas or not distances:
             return []
 
-        return self._build_knowledge_nodes(
-            documents=documents[0],
-            metadatas=metadatas[0],
-            scores=distances[0]
-        )
+        return [
+            KnowledgeNode(
+                content=document,
+                score=distance,
+                semantic_distance=distance,
+                metadata=self._to_document_metadata(metadata)
+            )
+            for document, metadata, distance in zip(
+                documents[0],
+                metadatas[0],
+                distances[0],
+                strict=False
+            )
+        ]
 
     def get_all_chunks(self) -> list[KnowledgeNode]:
         """Return every indexed chunk."""
@@ -164,11 +221,18 @@ class VectorRepository:
         if not documents or not metadatas:
             return []
 
-        return self._build_knowledge_nodes(
-            documents=documents,
-            metadatas=metadatas,
-            scores=[0.0] * len(documents)
-        )
+        return [
+            KnowledgeNode(
+                content=document,
+                score=0.0,
+                metadata=self._to_document_metadata(metadata)
+            )
+            for document, metadata in zip(
+                documents,
+                metadatas,
+                strict=False
+            )
+        ]
 
     def get_chunks(
         self,
@@ -190,11 +254,81 @@ class VectorRepository:
         if not documents or not metadatas:
             return []
 
-        return self._build_knowledge_nodes(
-            documents=documents,
-            metadatas=metadatas,
-            scores=[0.0] * len(documents)
+        return [
+            KnowledgeNode(
+                content=document,
+                score=0.0,
+                metadata=self._to_document_metadata(metadata)
+            )
+            for document, metadata in zip(
+                documents,
+                metadatas,
+                strict=False
+            )
+        ]
+
+    def keyword_search(
+        self,
+        question: str,
+        top_k: int = 5,
+        where: Where | None = None
+    ) -> list[KnowledgeNode]:
+        """Retrieve knowledge using weighted keyword matching."""
+
+        candidates = self.get_chunks(
+            where=where
         )
+
+        if not candidates:
+            return []
+
+        question_tokens = self._get_question_tokens(
+            question
+        )
+
+        if not question_tokens:
+            return []
+
+        scored_nodes: list[tuple[float, KnowledgeNode]] = []
+
+        for node in candidates:
+
+            if self._is_question_or_activity_chunk(
+                node.content
+            ):
+                continue
+
+            content_tokens = self.keyword_tokenizer.tokenize(
+                node.content
+            )
+
+            keyword_score = self.keyword_scorer.score(
+                query_tokens=question_tokens,
+                content_tokens=content_tokens,
+            )
+
+            if keyword_score <= 0.0:
+                continue
+
+            node.keyword_score = keyword_score
+            node.score = keyword_score
+
+            scored_nodes.append(
+                (
+                    keyword_score,
+                    node,
+                )
+            )
+
+        scored_nodes.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        return [
+            node
+            for _, node in scored_nodes[:top_k]
+        ]
 
     def document_exists(
         self,
@@ -203,7 +337,9 @@ class VectorRepository:
         """Return True if the document has already been indexed."""
 
         results = self.collection.get(
-            where={"document_id": document_id},
+            where={
+                "document_id": document_id
+            },
             limit=1
         )
 
@@ -230,42 +366,22 @@ class VectorRepository:
     # Private Helpers
     # -----------------------------------------------------------------
 
-    def _build_knowledge_nodes(
+    def _get_question_tokens(
         self,
-        documents: list[str],
-        metadatas: list[Metadata],
-        scores: list[float]
-    ) -> list[KnowledgeNode]:
-        """Convert Chroma results into KnowledgeNode objects."""
+        question: str,
+    ) -> list[str]:
+        """Return meaningful normalized question tokens."""
+
+        tokens = self.keyword_tokenizer.tokenize(
+            question
+        )
 
         return [
-            self._to_knowledge_node(
-                document=document,
-                metadata=metadata,
-                score=score
-            )
-            for document, metadata, score in zip(
-                documents,
-                metadatas,
-                scores
-            )
+            token
+            for token in tokens
+            if len(token) >= 3
+            and token not in self._KEYWORD_STOP_WORDS
         ]
-
-    def _to_knowledge_node(
-        self,
-        document: str,
-        metadata: Metadata,
-        score: float
-    ) -> KnowledgeNode:
-        """Create a KnowledgeNode."""
-
-        return KnowledgeNode(
-            content=document,
-            score=score,
-            metadata=self._to_document_metadata(
-                metadata
-            )
-        )
 
     def _to_document_metadata(
         self,
@@ -299,57 +415,84 @@ class VectorRepository:
             )
         )
 
-
-
-    def keyword_search(
+    def _is_question_chunk(
         self,
-        question: str,
-        top_k: int = 5,
-        where: Where | None = None
-    ) -> list[KnowledgeNode]:
-        """
-        Retrieve knowledge using keyword matching.
-        """
+        content: str,
+    ) -> bool:
+        """Return whether the chunk is structurally a question."""
 
-        candidates = self.get_chunks(
-            where=where
+        stripped = content.strip()
+
+        if "?" in stripped:
+            return True
+
+        question_starters = (
+            "who ",
+            "what ",
+            "when ",
+            "where ",
+            "why ",
+            "how ",
+            "which ",
+            "whom ",
+            "whose ",
+            "can ",
+            "could ",
+            "would ",
+            "should ",
+            "is ",
+            "are ",
+            "was ",
+            "were ",
+            "do ",
+            "does ",
+            "did ",
         )
 
-        if not candidates:
-            return []
+        return stripped.lower().startswith(question_starters)
 
-        question_words = {
-            word.strip(".,:;!?()[]{}\"'").lower()
-            for word in question.split()
-            if len(word) >= 3
-        }
+    def _is_question_or_activity_chunk(
+        self,
+        content: str,
+    ) -> bool:
+        """Return whether source content is primarily a question or activity."""
 
-        scored_nodes: list[tuple[int, KnowledgeNode]] = []
+        normalized = " ".join(
+            content.split()
+        ).strip()
 
-        for node in candidates:
+        if not normalized:
+            return True
 
-            content_words = {
-                word.strip(".,:;!?()[]{}\"'").lower()
-                for word in node.content.split()
-            }
+        question_count = normalized.count("?")
 
-            score = len(
-                question_words.intersection(
-                    content_words
-                )
+        numbered_question_count = len(
+            re.findall(
+                r"\b\d+\.\s+.*?\?",
+                normalized,
             )
-
-            if score > 0:
-                scored_nodes.append(
-                    (score, node)
-                )
-
-        scored_nodes.sort(
-            key=lambda item: item[0],
-            reverse=True
         )
 
-        return [
-            node
-            for _, node in scored_nodes[:top_k]
-        ]
+        instruction_count = len(
+            re.findall(
+                r"\b(?:explain|discuss|develop|prepare|create|"
+                r"document|translate|divide|identify|describe|"
+                r"compare|write|list|state|observe)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+
+        if numbered_question_count >= 2:
+            return True
+
+        if question_count >= 2:
+            return True
+
+        if instruction_count >= 2 and question_count >= 1:
+            return True
+
+        if question_count == 1:
+            return True
+
+        return False

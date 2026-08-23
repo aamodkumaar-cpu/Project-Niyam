@@ -6,16 +6,18 @@ Type:
 
 Purpose:
     Merge retrieval results from multiple retrieval strategies into
-    one deterministic ranked result set.
+    one deterministic result set while preserving independent
+    retrieval signals.
 
 Responsibilities:
     - Merge semantic and keyword retrieval results.
     - Remove duplicate source chunks.
-    - Preserve the strongest score for duplicates.
-    - Rank results by descending relevance.
+    - Preserve the strongest semantic signal.
+    - Preserve the strongest keyword signal.
 
 Does NOT:
     - Retrieve knowledge.
+    - Perform final ranking.
     - Inspect document semantics.
     - Apply domain-specific rules.
     - Call the LLM.
@@ -25,14 +27,14 @@ from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 
 class ResultMerger:
-    """Merges and deterministically ranks retrieval results."""
+    """Merges retrieval results while preserving retrieval signals."""
 
     def merge(
         self,
         semantic_nodes: list[KnowledgeNode],
         keyword_nodes: list[KnowledgeNode],
     ) -> list[KnowledgeNode]:
-        """Merge, deduplicate, and rank retrieval results."""
+        """Merge semantic and keyword retrieval results."""
 
         merged: dict[
             tuple[str, int, int],
@@ -51,14 +53,60 @@ class ResultMerger:
                 merged[key] = node
                 continue
 
-            if node.score > existing.score:
-                merged[key] = node
+            merged[key] = self._merge_nodes(
+                existing,
+                node,
+            )
 
-        return sorted(
-            merged.values(),
-            key=lambda node: node.score,
-            reverse=True,
+        return list(merged.values())
+
+    def _merge_nodes(
+        self,
+        first: KnowledgeNode,
+        second: KnowledgeNode,
+    ) -> KnowledgeNode:
+        """Combine retrieval signals from duplicate chunks."""
+
+        semantic_distance = self._best_semantic_distance(
+            first.semantic_distance,
+            second.semantic_distance,
         )
+
+        keyword_score = max(
+            first.keyword_score,
+            second.keyword_score,
+        )
+
+        if semantic_distance is not None:
+            score = semantic_distance
+        else:
+            score = keyword_score
+
+        return KnowledgeNode(
+            content=first.content,
+            score=score,
+            semantic_distance=semantic_distance,
+            keyword_score=keyword_score,
+            metadata=first.metadata,
+        )
+
+    def _best_semantic_distance(
+        self,
+        first: float | None,
+        second: float | None,
+    ) -> float | None:
+        """Return the lowest available semantic distance."""
+
+        distances = [
+            distance
+            for distance in (first, second)
+            if distance is not None
+        ]
+
+        if not distances:
+            return None
+
+        return min(distances)
 
     def _source_key(
         self,

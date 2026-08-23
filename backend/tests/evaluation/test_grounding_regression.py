@@ -485,3 +485,669 @@ def test_explicit_maximum_per_heading_is_enforced() -> None:
 
     assert len(knowledge.facts) == 2
 
+
+def test_exhaustive_request_covers_all_represented_experience_headings() -> None:
+    """Ensure exhaustive requests cover every represented experience heading."""
+
+    cloudera = _create_node(
+        "resume.pdf",
+        "Senior Engineering Manager, Cloudera (2022–2025)\n"
+        "● Built a RAG-based support assistant.\n"
+        "● Reduced cluster bootstrap time by 60%.",
+    )
+
+    oracle = _create_node(
+        "resume.pdf",
+        "Software Development Manager, Oracle (2006–2019)\n"
+        "● Led Oracle Cloud PaaS services.\n"
+        "● Built OCI services.",
+    )
+
+    knowledge = _create_extractor(
+        _response(
+            "C1_1",
+            "C1_2",
+            "C2_1",
+            "C2_2",
+        )
+    ).extract(
+        question=(
+            "Share my experience from all companies. "
+            "Give me maximum 2 bullet points from each company."
+        ),
+        knowledge_nodes=[
+            cloudera,
+            oracle,
+        ],
+    )
+
+    assert len(knowledge.facts) == 4
+
+    assert [
+        fact.name
+        for fact in knowledge.facts
+    ] == [
+        "Senior Engineering Manager, Cloudera (2022–2025)",
+        "Senior Engineering Manager, Cloudera (2022–2025)",
+        "Software Development Manager, Oracle (2006–2019)",
+        "Software Development Manager, Oracle (2006–2019)",
+    ]
+
+
+
+def test_exhaustive_request_does_not_depend_on_resume_specific_company_names() -> None:
+    """Ensure exhaustive selection works with arbitrary professional headings."""
+
+    supplier = _create_node(
+        "supplier.pdf",
+        "Supplier Operations Lead (2020–2024)\n"
+        "● Managed supplier operations.\n"
+        "● Improved fulfillment reliability.",
+    )
+
+    manufacturer = _create_node(
+        "manufacturer.pdf",
+        "Manufacturing Director (2018–2023)\n"
+        "● Led manufacturing operations.\n"
+        "● Reduced production downtime.",
+    )
+
+    knowledge = _create_extractor(
+        _response(
+            "C1_1",
+            "C1_2",
+            "C2_1",
+            "C2_2",
+        )
+    ).extract(
+        question=(
+            "Give me experience from all roles. "
+            "Give maximum 2 bullet points from each role."
+        ),
+        knowledge_nodes=[
+            supplier,
+            manufacturer,
+        ],
+    )
+
+    assert len(knowledge.facts) == 4
+
+    assert {
+        fact.name
+        for fact in knowledge.facts
+    } == {
+        "Supplier Operations Lead (2020–2024)",
+        "Manufacturing Director (2018–2023)",
+    }
+
+
+
+def test_non_exhaustive_general_knowledge_request_is_not_treated_as_experience() -> None:
+    """Ensure general knowledge headings are not treated as professional experience."""
+
+    node = _create_node(
+        "science.pdf",
+        "Climate Change\n"
+        "● Climate change can increase extreme weather events.\n"
+        "● Rising temperatures affect weather patterns.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1")
+    ).extract(
+        question="What does the document say about climate change?",
+        knowledge_nodes=[node],
+    )
+
+    assert len(knowledge.facts) == 1
+
+    assert (
+        knowledge.facts[0].name
+        == "Climate Change"
+    )
+
+    assert (
+        knowledge.facts[0].value
+        == "Climate change can increase extreme weather events."
+    )
+
+def test_exhaustive_request_completes_missing_experience_heading() -> None:
+    """Ensure deterministic completion covers a heading omitted by the LLM."""
+
+    cloudera = _create_node(
+        "resume.pdf",
+        "Senior Engineering Manager, Cloudera (2022–2025)\n"
+        "● Built a RAG-based support assistant.\n"
+        "● Reduced cluster bootstrap time by 60%.",
+    )
+
+    oracle = _create_node(
+        "resume.pdf",
+        "Software Development Manager, Oracle (2006–2019)\n"
+        "● Led Oracle Cloud PaaS services.\n"
+        "● Built OCI services.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1", "C1_2")
+    ).extract(
+        question=(
+            "Share my experience from all companies. "
+            "Give me maximum 2 bullet points from each company."
+        ),
+        knowledge_nodes=[
+            cloudera,
+            oracle,
+        ],
+    )
+
+    assert len(knowledge.facts) == 4
+
+    assert {
+        fact.name
+        for fact in knowledge.facts
+    } == {
+        "Senior Engineering Manager, Cloudera (2022–2025)",
+        "Software Development Manager, Oracle (2006–2019)",
+    }
+
+
+def test_unsupported_relationship_returns_no_knowledge() -> None:
+    """Reject relationships that are not explicitly stated by the source."""
+
+    node = _create_node(
+        "iest102.pdf",
+        "Human activities, such as deforestation, disturb "
+        "the natural balance of slopes. "
+        "Erosion removes fertile topsoil needed for crop growth.",
+    )
+
+    knowledge = _create_extractor(
+        _response()
+    ).extract(
+        question=(
+            "How are deforestation and erosion "
+            "associated with each other?"
+        ),
+        knowledge_nodes=[node],
+    )
+
+    assert knowledge.facts == []
+
+
+
+
+
+def test_supported_relationship_selects_complementary_evidence() -> None:
+    """Select complementary source evidence for a supported relationship."""
+
+    node = _create_node(
+        "iest102.pdf",
+        "Deforestation removes vegetation from the land. "
+        "Sparse vegetation leaves the land exposed to erosion.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1", "C1_2")
+    ).extract(
+        question=(
+            "How are deforestation and erosion "
+            "associated with each other?"
+        ),
+        knowledge_nodes=[node],
+    )
+
+    assert len(knowledge.facts) == 2
+
+    assert [
+        fact.value
+        for fact in knowledge.facts
+    ] == [
+        "Deforestation removes vegetation from the land.",
+        "Sparse vegetation leaves the land exposed to erosion.",
+    ]
+
+
+def test_relationship_requires_collective_source_support() -> None:
+    """Reject relationship selection when evidence does not establish the relationship."""
+
+    node = _create_node(
+        "iest102.pdf",
+        "Deforestation removes vegetation from the land. "
+        "Erosion removes fertile topsoil needed for crop growth.",
+    )
+
+    knowledge = _create_extractor(
+        _response()
+    ).extract(
+        question=(
+            "How are deforestation and erosion "
+            "associated with each other?"
+        ),
+        knowledge_nodes=[node],
+    )
+
+    assert knowledge.facts == []
+
+
+
+def test_answer_generator_returns_grounded_llm_answer() -> None:
+    """Ensure answer generation delegates synthesis to the grounded LLM."""
+
+    from backend.extraction.AnswerGenerator import AnswerGenerator
+    from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+
+    class FakeAnswerLlm:
+        """Return a deterministic grounded answer."""
+
+        def generate(
+            self,
+            messages: Messages,
+            response_format: object = None,
+        ) -> str:
+            """Return a deterministic relationship answer."""
+
+            _ = response_format
+
+            prompt = "\n".join(
+                message["content"]
+                for message in messages
+            )
+
+            assert (
+                "Deforestation removes vegetation from the land."
+                in prompt
+            )
+
+            assert (
+                "Sparse vegetation leaves the land exposed to erosion."
+                in prompt
+            )
+
+            return (
+                "Deforestation removes vegetation from the land, "
+                "leaving the land exposed to erosion."
+            )
+
+    knowledge = StructuredKnowledge(
+        facts=[
+            KnowledgeFact(
+                name="Deforestation",
+                value="Deforestation removes vegetation from the land.",
+                source="iest102.pdf",
+                page_number=1,
+                confidence=1.0,
+            ),
+            KnowledgeFact(
+                name="Erosion",
+                value=(
+                    "Sparse vegetation leaves the land exposed to erosion."
+                ),
+                source="iest102.pdf",
+                page_number=1,
+                confidence=1.0,
+            ),
+        ]
+    )
+
+    answer_generator = AnswerGenerator(
+        prompt_builder=AnswerPromptBuilder(),
+        llm_client=FakeAnswerLlm(),
+    )
+
+    answer = answer_generator.generate(
+        question=(
+            "How are deforestation and erosion "
+            "associated with each other?"
+        ),
+        knowledge=knowledge,
+    )
+
+    assert (
+        answer
+        == (
+            "Deforestation removes vegetation from the land, "
+            "leaving the land exposed to erosion."
+        )
+    )
+
+
+def test_answer_generator_does_not_call_llm_without_knowledge() -> None:
+    """Ensure empty structured knowledge returns the grounded fallback."""
+
+    from backend.extraction.AnswerGenerator import AnswerGenerator
+    from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+
+    class FailingAnswerLlm:
+        """Fail the test if the LLM is called without knowledge."""
+
+        def generate(
+            self,
+            messages: Messages,
+            response_format: object = None,
+        ) -> str:
+            """Reject unexpected LLM invocation."""
+
+            raise AssertionError(
+                "LLM must not be called when structured knowledge is empty."
+            )
+
+    answer_generator = AnswerGenerator(
+        prompt_builder=AnswerPromptBuilder(),
+        llm_client=FailingAnswerLlm(),
+    )
+
+    answer = answer_generator.generate(
+        question="How are deforestation and erosion associated?",
+        knowledge=StructuredKnowledge(),
+    )
+
+    assert (
+        answer
+        == "The supplied knowledge does not contain the answer."
+    )
+
+
+
+
+
+def test_relationship_answer_preserves_complementary_evidence() -> None:
+    """Ensure relationship answers retain complementary grounded facts."""
+
+    knowledge = StructuredKnowledge(
+        facts=[
+            KnowledgeFact(
+                name="iest102.pdf",
+                value="Deforestation removes vegetation from the land.",
+                source="iest102.pdf",
+                page_number=1,
+                confidence=1.0,
+            ),
+            KnowledgeFact(
+                name="iest102.pdf",
+                value=(
+                    "Sparse vegetation leaves the land exposed to erosion."
+                ),
+                source="iest102.pdf",
+                page_number=1,
+                confidence=1.0,
+            ),
+        ]
+    )
+
+    answer = _create_extractor(
+        _response()
+    )
+
+    _ = answer
+
+
+def test_knowledge_search_service_returns_grounded_relationship_answer() -> None:
+    """Ensure the complete knowledge search workflow preserves grounded relationship evidence."""
+
+    from backend.diagnostic.ExecutionDebugger import ExecutionDebugger
+    from backend.retrieval.KnowledgeSearchService import KnowledgeSearchService
+
+    node = _create_node(
+        "iest102.pdf",
+        "Deforestation removes vegetation from the land. "
+        "Sparse vegetation leaves the land exposed to erosion.",
+    )
+
+    class FakeRetrievalPipeline:
+        """Returns deterministic source evidence."""
+
+        def retrieve(
+            self,
+            question: str,
+            where: object = None,
+        ) -> list[KnowledgeNode]:
+            """Return the configured knowledge node."""
+
+            _ = question
+            _ = where
+
+            return [node]
+
+    class FakeExecutionDebugger:
+        """Provides the debugger contract required by the search service."""
+
+        def question(
+            self,
+            question: str,
+        ) -> None:
+            """Ignore question debugging."""
+
+            _ = question
+
+        def retrieval(
+            self,
+            question: str,
+            knowledge_nodes: list[KnowledgeNode],
+        ) -> None:
+            """Ignore retrieval debugging."""
+
+            _ = question
+            _ = knowledge_nodes
+
+        def extraction(
+            self,
+            knowledge: StructuredKnowledge,
+        ) -> None:
+            """Ignore extraction debugging."""
+
+            _ = knowledge
+
+        def answer(
+            self,
+            answer: str,
+        ) -> None:
+            """Ignore answer debugging."""
+
+            _ = answer
+
+    knowledge_extractor = _create_extractor(
+        _response("C1_1", "C1_2")
+    )
+
+    from backend.extraction.AnswerGenerator import AnswerGenerator
+    from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+
+    class FakeAnswerLlm:
+        """Return a deterministic grounded answer."""
+
+        def generate(
+            self,
+            messages: Messages,
+            response_format: object = None,
+        ) -> str:
+            """Return the expected grounded relationship answer."""
+
+            _ = messages
+            _ = response_format
+
+            return (
+                "Deforestation removes vegetation from the land. "
+                "Sparse vegetation leaves the land exposed to erosion."
+            )
+
+    answer_generator = AnswerGenerator(
+        prompt_builder=AnswerPromptBuilder(),
+        llm_client=FakeAnswerLlm(),
+    )
+
+    service = KnowledgeSearchService(
+        retrieval_pipeline=FakeRetrievalPipeline(),
+        knowledge_extractor=knowledge_extractor,
+        answer_generator=answer_generator,
+        execution_debugger=FakeExecutionDebugger(),
+    )
+
+    from backend.agent.ExecutionContext import ExecutionContext
+    from backend.agent.Request import Request
+
+    context = ExecutionContext(
+        request=Request(
+            question=(
+                "How are deforestation and erosion "
+                "associated with each other?"
+            )
+        )
+    )
+
+    result = service.search(context)
+
+    assert (
+        "Deforestation removes vegetation from the land."
+        in result.answer
+    )
+
+    assert (
+        "Sparse vegetation leaves the land exposed to erosion."
+        in result.answer
+    )
+
+    assert len(result.sources) == 1
+
+    assert result.sources[0].source == "iest102.pdf"
+
+
+
+
+def test_knowledge_search_service_returns_grounded_relationship_answer() -> None:
+    """Ensure the complete knowledge search workflow preserves grounded evidence."""
+
+    from backend.compliance.BusinessProfile import BusinessProfile
+    from backend.orchestration.ExecutionContext import ExecutionContext
+    from backend.orchestration.RequestContext import RequestContext
+    from backend.retrieval.KnowledgeSearchService import KnowledgeSearchService
+
+    class FakeRetrievalPipeline:
+        """Return deterministic knowledge nodes for integration testing."""
+
+        def retrieve(
+            self,
+            question: str,
+            where: object = None,
+        ) -> list[KnowledgeNode]:
+            """Return the configured source node."""
+
+            _ = question
+            _ = where
+
+            return [
+                _create_node(
+                    "iest102.pdf",
+                    "Deforestation removes vegetation from the land. "
+                    "Sparse vegetation leaves the land exposed to erosion.",
+                )
+            ]
+
+    class FakeExecutionDebugger:
+        """Provide the debugger contract required by the search service."""
+
+        def question(
+            self,
+            question: str,
+        ) -> None:
+            """Ignore question debugging."""
+
+            _ = question
+
+        def retrieval(
+            self,
+            question: str,
+            knowledge_nodes: list[KnowledgeNode],
+        ) -> None:
+            """Ignore retrieval debugging."""
+
+            _ = question
+            _ = knowledge_nodes
+
+        def extraction(
+            self,
+            knowledge: StructuredKnowledge,
+        ) -> None:
+            """Ignore extraction debugging."""
+
+            _ = knowledge
+
+        def answer(
+            self,
+            answer: str,
+        ) -> None:
+            """Ignore answer debugging."""
+
+            _ = answer
+
+    class FakeAnswerLlm:
+        """Return a deterministic grounded answer."""
+
+        def generate(
+            self,
+            messages: Messages,
+            response_format: object = None,
+        ) -> str:
+            """Return the grounded relationship answer."""
+
+            _ = messages
+            _ = response_format
+
+            return (
+                "Deforestation removes vegetation from the land. "
+                "Sparse vegetation leaves the land exposed to erosion."
+            )
+
+    knowledge_extractor = _create_extractor(
+        _response("C1_1", "C1_2")
+    )
+
+    from backend.extraction.AnswerGenerator import AnswerGenerator
+    from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+
+    answer_generator = AnswerGenerator(
+        prompt_builder=AnswerPromptBuilder(),
+        llm_client=FakeAnswerLlm(),
+    )
+
+    service = KnowledgeSearchService(
+        retrieval_pipeline=FakeRetrievalPipeline(),
+        knowledge_extractor=knowledge_extractor,
+        answer_generator=answer_generator,
+        execution_debugger=FakeExecutionDebugger(),
+    )
+
+    business_profile = BusinessProfile(
+        business_name="Test Business",
+        industry="General",
+        company_size=10,
+        state="Delhi",
+    )
+
+    request = RequestContext(
+        question=(
+            "How are deforestation and erosion "
+            "associated with each other?"
+        ),
+        business_profile=business_profile,
+    )
+
+    context = ExecutionContext(
+        request=request,
+    )
+
+    result = service.search(context)
+
+    assert (
+        "Deforestation removes vegetation from the land."
+        in result.answer
+    )
+
+    assert (
+        "Sparse vegetation leaves the land exposed to erosion."
+        in result.answer
+    )
+
+    assert len(result.sources) == 1
+
+    assert result.sources[0].source == "iest102.pdf"

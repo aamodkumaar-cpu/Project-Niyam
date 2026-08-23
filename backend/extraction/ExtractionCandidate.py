@@ -11,6 +11,7 @@ Responsibilities:
 - Preserve original source text.
 - Preserve source metadata.
 - Preserve source heading.
+- Preserve structural ownership context.
 - Provide a stable candidate identifier.
 
 Does NOT:
@@ -32,6 +33,7 @@ class ExtractionCandidate:
 
     candidate_id: str
     heading: str
+    structural_context: str
     source_quote: str
     node: KnowledgeNode
 
