@@ -2,72 +2,54 @@
 Knowledge Extractor.
 
 Type:
+
     Domain Service
 
 Purpose:
-    Select source-grounded knowledge from deterministic source candidates.
+
+    Select source-grounded knowledge from deterministic extraction candidates.
 
 Responsibilities:
-    - Build deterministic source candidates.
-    - Ask the LLM which candidates answer the question.
-    - Parse candidate selections.
-    - Resolve selected IDs back to original source fragments.
-    - Enforce exhaustive request coverage.
-    - Enforce explicit maximum facts per heading.
-    - Validate source grounding.
-    - Produce StructuredKnowledge.
+
+    - Analyze extraction question constraints.
+    - Build deterministic extraction candidates.
+    - Rank candidates at fact level.
+    - Ask the LLM to select supporting candidates.
+    - Validate selected source evidence.
+    - Enforce deterministic extraction constraints.
+    - Produce structured knowledge.
 
 Does NOT:
+
     - Retrieve knowledge.
-    - Contain domain-specific business rules.
-    - Interpret resumes, companies, vendors, or other domain entities.
-    - Generate source wording.
-    - Rewrite facts.
-    - Answer user questions.
-    - Perform semantic similarity.
+    - Generate final natural-language answers.
+    - Invent factual content.
 """
 
 from __future__ import annotations
 
-import re
-
-from backend.diagnostic.ExecutionDebuggerContract import (
-    ExecutionDebuggerContract,
-)
-from backend.extraction.ExtractionCandidate import (
-    ExtractionCandidate,
-)
+from backend.diagnostic.ExecutionDebuggerContract import ExecutionDebuggerContract
+from backend.extraction.ExtractionCandidate import ExtractionCandidate
 from backend.extraction.ExtractionCandidateBuilder import (
     ExtractionCandidateBuilder,
 )
-from backend.extraction.ExtractionPromptBuilder import (
-    ExtractionPromptBuilder,
+from backend.extraction.ExtractionCandidateRanker import (
+    ExtractionCandidateRanker,
+)
+from backend.extraction.ExtractionQuestionAnalyzer import (
+    ExtractionQuestionAnalyzer,
 )
 from backend.extraction.ExtractionResponseParser import (
     ExtractionResponseParser,
-    ExtractionSelection,
 )
-from backend.extraction.KnowledgeFact import (
-    KnowledgeFact,
-)
-from backend.extraction.KnowledgeSchema import (
-    KnowledgeSchema,
-)
-from backend.extraction.SourceQuoteValidator import (
-    SourceQuoteValidator,
-)
-from backend.extraction.StructuredKnowledge import (
-    StructuredKnowledge,
-)
-from backend.llm.LLMClient import (
-    LLMClient,
-)
-from backend.llm.Message import (
-    Messages,
-)
-from backend.retrieval.KnowledgeNode import (
-    KnowledgeNode,
-)
+from backend.extraction.KnowledgeFact import KnowledgeFact
+from backend.extraction.KnowledgeSchema import KnowledgeSchema
+from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
+from backend.llm.LLMClient import LLMClient
+from backend.llm.Message import Messages
+from backend.retrieval.KnowledgeNode import KnowledgeNode
+from backend.extraction.StructuredKnowledge import StructuredKnowledge
+#from backend.results.ExtractionSelection import ExtractionSelection
 
 
 class KnowledgeExtractor:
@@ -75,13 +57,15 @@ class KnowledgeExtractor:
 
     def __init__(
         self,
-        prompt_builder: ExtractionPromptBuilder,
+        prompt_builder,
         llm_client: LLMClient,
         execution_debugger: ExecutionDebuggerContract,
         knowledge_schema: KnowledgeSchema,
         source_quote_validator: SourceQuoteValidator,
         response_parser: ExtractionResponseParser,
         candidate_builder: ExtractionCandidateBuilder,
+        question_analyzer: ExtractionQuestionAnalyzer,
+        candidate_ranker: ExtractionCandidateRanker,
     ) -> None:
         """Initialize the knowledge extractor."""
 
@@ -92,8 +76,8 @@ class KnowledgeExtractor:
         self.source_quote_validator = source_quote_validator
         self.response_parser = response_parser
         self.candidate_builder = candidate_builder
-
-
+        self.question_analyzer = question_analyzer
+        self.candidate_ranker = candidate_ranker
 
     def extract(
         self,
@@ -102,21 +86,33 @@ class KnowledgeExtractor:
     ) -> StructuredKnowledge:
         """Select and return only source-grounded knowledge."""
 
-        relationship = self.prompt_builder._is_relationship_question(
-            question
+        relationship = (
+            self.question_analyzer.is_relationship_question(
+                question
+            )
         )
 
         candidates = self.candidate_builder.build(
-            knowledge_nodes,
+            knowledge_nodes=knowledge_nodes,
             relationship=relationship,
         )
 
         if not candidates:
             return StructuredKnowledge()
 
-        messages: Messages = self.prompt_builder.build(
+        ranked_candidates = self.candidate_ranker.rank(
             question=question,
             candidates=candidates,
+        )
+
+        prompt_candidates = self.candidate_ranker.select_for_prompt(
+            question=question,
+            candidates=ranked_candidates,
+        )
+
+        messages: Messages = self.prompt_builder.build(
+            question=question,
+            candidates=prompt_candidates,
         )
 
         self.execution_debugger.prompt(
@@ -125,7 +121,6 @@ class KnowledgeExtractor:
 
         response = self.llm_client.generate(
             messages=messages,
-            response_format=self.knowledge_schema.json_schema(),
         )
 
         self.execution_debugger.raw_llm_response(
@@ -137,9 +132,6 @@ class KnowledgeExtractor:
             response
         )
 
-        # ZERO-SELECTION means there is no source-supported answer.
-        # Do not allow any downstream component to fall back to
-        # retrieved-but-unselected knowledge.
         if not selections:
             knowledge = StructuredKnowledge()
 
@@ -161,8 +153,6 @@ class KnowledgeExtractor:
 
         return knowledge
 
-
-
     def _build_structured_knowledge(
         self,
         selections: list[ExtractionSelection],
@@ -176,12 +166,16 @@ class KnowledgeExtractor:
             for candidate in candidates
         }
 
-        maximum = self._extract_max_per_heading(
-            question
+        maximum = (
+            self.question_analyzer.extract_max_per_heading(
+                question
+            )
         )
 
-        exhaustive = self._is_exhaustive_request(
-            question
+        exhaustive = (
+            self.question_analyzer.is_exhaustive_request(
+                question
+            )
         )
 
         knowledge = StructuredKnowledge()
@@ -383,6 +377,7 @@ class KnowledgeExtractor:
                 )
 
                 current_count += 1
+
                 heading_counts[heading] = (
                     current_count
                 )
@@ -402,59 +397,6 @@ class KnowledgeExtractor:
             source=candidate.node.metadata.source,
             page_number=candidate.node.metadata.page_number,
             confidence=confidence,
-        )
-
-    def _extract_max_per_heading(
-        self,
-        question: str,
-    ) -> int | None:
-        """Extract an explicit maximum-per-heading constraint."""
-
-        patterns = (
-            r"\b(?:only|exactly)\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)\b",
-            r"\b(?:max(?:imum)?|up\s+to)\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)\b",
-        )
-
-        for pattern in patterns:
-            match = re.search(
-                pattern,
-                question,
-                flags=re.IGNORECASE,
-            )
-
-            if match is not None:
-                maximum = int(
-                    match.group(1)
-                )
-
-                if maximum > 0:
-                    return maximum
-
-        return None
-
-    def _is_exhaustive_request(
-        self,
-        question: str,
-    ) -> bool:
-        """Return whether the question requests exhaustive coverage."""
-
-        normalized = question.lower()
-
-        exhaustive_terms = (
-            "all ",
-            "all the ",
-            "each ",
-            "every ",
-            "from all ",
-            "from each ",
-            "from every ",
-        )
-
-        return any(
-            term in normalized
-            for term in exhaustive_terms
         )
 
     def _candidate_heading(

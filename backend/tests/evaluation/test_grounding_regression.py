@@ -17,7 +17,12 @@ from backend.extraction.StructuredKnowledge import StructuredKnowledge
 from backend.ingestion.KnowledgeDomain import KnowledgeDomain
 from backend.llm.Message import Messages
 from backend.retrieval.DocumentMetadata import DocumentMetadata
+from backend.retrieval.KeywordScorer import KeywordScorer
+from backend.retrieval.KeywordTokenizer import KeywordTokenizer
 from backend.retrieval.KnowledgeNode import KnowledgeNode
+
+from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
+from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
 
 
 class FakeOllamaService:
@@ -115,6 +120,11 @@ def _create_extractor(
         source_quote_validator=SourceQuoteValidator(),
         response_parser=ExtractionResponseParser(),
         candidate_builder=ExtractionCandidateBuilder(),
+        question_analyzer=ExtractionQuestionAnalyzer(),
+        candidate_ranker=ExtractionCandidateRanker(
+            keyword_tokenizer=KeywordTokenizer(),
+            keyword_scorer=KeywordScorer(),
+        ),
     )
 
 
@@ -1151,3 +1161,31 @@ def test_knowledge_search_service_returns_grounded_relationship_answer() -> None
     assert len(result.sources) == 1
 
     assert result.sources[0].source == "iest102.pdf"
+
+
+
+def test_supported_semantic_fact_selects_source_evidence() -> None:
+    """Ensure semantically equivalent wording can select source evidence."""
+
+    node = _create_node(
+        "iest102.pdf",
+        "Sparse vegetation cover, often due to deforestation, "
+        "also leaves the land exposed.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1")
+    ).extract(
+        question="What does deforestation remove from the land?",
+        knowledge_nodes=[node],
+    )
+
+    assert len(knowledge.facts) == 1
+
+    assert (
+        knowledge.facts[0].value
+        == (
+            "Sparse vegetation cover, often due to deforestation, "
+            "also leaves the land exposed."
+        )
+    )

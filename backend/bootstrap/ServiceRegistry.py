@@ -25,6 +25,8 @@ from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.config.settings import DOCUMENTS_DIR
 from backend.extraction.AnswerGenerator import AnswerGenerator
 from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
+from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
 from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
 from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
@@ -170,6 +172,13 @@ class ServiceRegistry:
 
         candidate_builder = ExtractionCandidateBuilder()
 
+        question_analyzer = ExtractionQuestionAnalyzer()
+
+        candidate_ranker = ExtractionCandidateRanker(
+            keyword_tokenizer=self.keyword_tokenizer,
+            keyword_scorer=self.keyword_scorer,
+        )
+
         self.knowledge_extractor = KnowledgeExtractor(
             prompt_builder=extraction_prompt_builder,
             llm_client=self.ollama_service,
@@ -178,12 +187,14 @@ class ServiceRegistry:
             source_quote_validator=source_quote_validator,
             response_parser=response_parser,
             candidate_builder=candidate_builder,
+            question_analyzer=question_analyzer,
+            candidate_ranker=candidate_ranker,
         )
 
         self.answer_generator = AnswerGenerator(
-                prompt_builder=AnswerPromptBuilder(),
-                llm_client=self.ollama_service,
-            )
+            prompt_builder=AnswerPromptBuilder(),
+            llm_client=self.ollama_service,
+        )
 
         self.execution_monitor = ExecutionMonitor()
 
