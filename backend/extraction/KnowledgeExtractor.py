@@ -41,6 +41,7 @@ from backend.extraction.ExtractionQuestionAnalyzer import (
 )
 from backend.extraction.ExtractionResponseParser import (
     ExtractionResponseParser,
+    ExtractionSelection,
 )
 from backend.extraction.KnowledgeFact import KnowledgeFact
 from backend.extraction.KnowledgeSchema import KnowledgeSchema
@@ -49,7 +50,7 @@ from backend.llm.LLMClient import LLMClient
 from backend.llm.Message import Messages
 from backend.retrieval.KnowledgeNode import KnowledgeNode
 from backend.extraction.StructuredKnowledge import StructuredKnowledge
-#from backend.results.ExtractionSelection import ExtractionSelection
+
 
 
 class KnowledgeExtractor:
@@ -88,6 +89,12 @@ class KnowledgeExtractor:
 
         relationship = (
             self.question_analyzer.is_relationship_question(
+                question
+            )
+        )
+
+        role_question = (
+            self.question_analyzer.is_role_question(
                 question
             )
         )
@@ -145,6 +152,7 @@ class KnowledgeExtractor:
             selections=selections,
             candidates=candidates,
             question=question,
+            role_question=role_question,
         )
 
         self.execution_debugger.extraction(
@@ -158,6 +166,7 @@ class KnowledgeExtractor:
         selections: list[ExtractionSelection],
         candidates: list[ExtractionCandidate],
         question: str,
+        role_question: bool,
     ) -> StructuredKnowledge:
         """Resolve selections and enforce deterministic extraction constraints."""
 
@@ -191,6 +200,7 @@ class KnowledgeExtractor:
             selected_ids=selected_ids,
             heading_counts=heading_counts,
             maximum=maximum,
+            role_question=role_question,
         )
 
         if exhaustive:
@@ -213,6 +223,7 @@ class KnowledgeExtractor:
         selected_ids: set[str],
         heading_counts: dict[str, int],
         maximum: int | None,
+        role_question: bool,
     ) -> None:
         """Accept valid candidates selected by the LLM."""
 
@@ -267,6 +278,11 @@ class KnowledgeExtractor:
             fact = self._create_fact(
                 candidate=candidate,
                 confidence=selection["confidence"],
+                value=(
+                    self._candidate_heading(candidate)
+                    if role_question
+                    else candidate.source_quote
+                ),
             )
 
             if self._is_duplicate(
@@ -386,6 +402,7 @@ class KnowledgeExtractor:
         self,
         candidate: ExtractionCandidate,
         confidence: float,
+        value: str | None = None,
     ) -> KnowledgeFact:
         """Create a source-grounded knowledge fact from a candidate."""
 
@@ -393,7 +410,11 @@ class KnowledgeExtractor:
             name=self._candidate_heading(
                 candidate
             ),
-            value=candidate.source_quote,
+            value=(
+                value
+                if value is not None
+                else candidate.source_quote
+            ),
             source=candidate.node.metadata.source,
             page_number=candidate.node.metadata.page_number,
             confidence=confidence,

@@ -12,6 +12,7 @@ Purpose:
 
 Responsibilities:
 
+    - Identify role questions.
     - Identify relationship or synthesis questions.
     - Identify exhaustive requests.
     - Extract explicit maximum-per-heading constraints.
@@ -32,6 +33,31 @@ import re
 
 class ExtractionQuestionAnalyzer:
     """Analyze deterministic constraints expressed by an extraction question."""
+
+    def is_role_question(
+        self,
+        question: str,
+    ) -> bool:
+        """Return whether the question asks for a person's role."""
+
+        normalized = question.lower().strip()
+
+        role_patterns = (
+            r"\bwhat\s+was\b.+\brole\b",
+            r"\bwhat\s+is\b.+\brole\b",
+            r"\bwhat\s+was\b.+\bposition\b",
+            r"\bwhat\s+is\b.+\bposition\b",
+            r"\bwhat\s+position\b",
+            r"\bwhat\s+role\b",
+        )
+
+        return any(
+            re.search(
+                pattern,
+                normalized,
+            )
+            for pattern in role_patterns
+        )
 
     def is_relationship_question(
         self,

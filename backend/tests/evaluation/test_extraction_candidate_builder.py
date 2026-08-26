@@ -223,3 +223,148 @@ def test_flattened_question_page_produces_no_false_candidates() -> None:
     candidates = ExtractionCandidateBuilder().build([node])
 
     assert candidates == []
+
+def test_inline_bullet_preserves_role_heading_for_24_7_ai():
+    from backend.extraction.ExtractionCandidateBuilder import (
+        ExtractionCandidateBuilder,
+    )
+    from backend.retrieval.KnowledgeNode import KnowledgeNode
+    from backend.retrieval.DocumentMetadata import DocumentMetadata
+    from backend.ingestion.KnowledgeDomain import KnowledgeDomain
+
+    node = KnowledgeNode(
+        content=(
+            "Professional Experience\n"
+            "Engineering Manager, 24[7].ai (Mar 2021–Sep 2022) "
+            "● Led AI-powered customer engagement platforms."
+        ),
+        score=1.0,
+        metadata=DocumentMetadata(
+            document_id="test",
+            source="test.pdf",
+            domain=KnowledgeDomain.GENERAL,
+            compliance_pack="",
+            page_number=1,
+            chunk_number=1,
+        ),
+    )
+
+    candidates = ExtractionCandidateBuilder().build([node])
+
+    assert len(candidates) == 1
+    assert (
+        candidates[0].heading
+        == "Engineering Manager, 24[7].ai (Mar 2021–Sep 2022)"
+    )
+    assert (
+        candidates[0].source_quote
+        == "Led AI-powered customer engagement platforms."
+    )
+
+
+def test_inline_bullet_preserves_cloudera_role_heading():
+    from backend.extraction.ExtractionCandidateBuilder import (
+        ExtractionCandidateBuilder,
+    )
+    from backend.retrieval.KnowledgeNode import KnowledgeNode
+    from backend.retrieval.DocumentMetadata import DocumentMetadata
+    from backend.ingestion.KnowledgeDomain import KnowledgeDomain
+
+    node = KnowledgeNode(
+        content=(
+            "Professional Experience\n"
+            "Senior Engineering Manager, Cloudera (Oct 2022–Jun 2025) "
+            "● Led 25+ engineers including principal engineers, architects, "
+            "and managers across India, US and Europe."
+        ),
+        score=1.0,
+        metadata=DocumentMetadata(
+            document_id="test",
+            source="test.pdf",
+            domain=KnowledgeDomain.GENERAL,
+            compliance_pack="",
+            page_number=1,
+            chunk_number=1,
+        ),
+    )
+
+    candidates = ExtractionCandidateBuilder().build([node])
+
+    assert len(candidates) == 1
+    assert (
+        candidates[0].heading
+        == "Senior Engineering Manager, Cloudera (Oct 2022–Jun 2025)"
+    )
+    assert (
+        candidates[0].source_quote
+        == "Led 25+ engineers including principal engineers, architects, "
+        "and managers across India, US and Europe."
+    )
+
+
+def test_parenthesized_prose_is_not_heading():
+    from backend.extraction.ExtractionCandidateBuilder import (
+        ExtractionCandidateBuilder,
+    )
+
+    builder = ExtractionCandidateBuilder()
+
+    assert not builder._looks_like_heading(
+        "The company operates in several countries "
+        "(including India and the US)."
+    )
+
+
+def test_new_inline_heading_replaces_previous_structural_context():
+    from backend.extraction.ExtractionCandidateBuilder import (
+        ExtractionCandidateBuilder,
+    )
+    from backend.retrieval.KnowledgeNode import KnowledgeNode
+    from backend.retrieval.DocumentMetadata import DocumentMetadata
+    from backend.ingestion.KnowledgeDomain import KnowledgeDomain
+
+    node = KnowledgeNode(
+        content=(
+            "Section A\n"
+            "First Role (2020–2021) ● First factual statement.\n"
+            "Second Role (2021–2022) ● Second factual statement."
+        ),
+        score=1.0,
+        metadata=DocumentMetadata(
+            document_id="test",
+            source="test.pdf",
+            domain=KnowledgeDomain.GENERAL,
+            compliance_pack="",
+            page_number=1,
+            chunk_number=1,
+        ),
+    )
+
+    candidates = ExtractionCandidateBuilder().build([node])
+
+    assert len(candidates) == 2
+
+    assert (
+        candidates[0].heading
+        == "First Role (2020–2021)"
+    )
+
+    assert (
+        candidates[0].source_quote
+        == "First factual statement."
+    )
+
+    assert (
+        candidates[1].heading
+        == "Second Role (2021–2022)"
+    )
+
+    assert (
+        candidates[1].source_quote
+        == "Second factual statement."
+    )
+
+    assert (
+        candidates[1].structural_context
+        == "Second Role (2021–2022)"
+    )

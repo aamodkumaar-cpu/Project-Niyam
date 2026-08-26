@@ -13,6 +13,7 @@ Purpose:
 Responsibilities:
 
     - Calculate candidate-level lexical relevance.
+    - Include structural scope when calculating relevance.
     - Rank candidates deterministically.
     - Retain candidates with meaningful relative relevance.
     - Bound the number of candidates sent to the LLM.
@@ -198,6 +199,7 @@ class ExtractionCandidateRanker:
             :self.maximum_candidates
         ]
 
+
     def _score_candidate(
         self,
         question_tokens: list[str],
@@ -205,13 +207,52 @@ class ExtractionCandidateRanker:
     ) -> float:
         """Return lexical relevance of one extraction candidate."""
 
-        candidate_tokens = self.keyword_tokenizer.tokenize(
+        structural_text = " ".join(
+            part
+            for part in (
+                candidate.heading,
+                candidate.structural_context,
+            )
+            if part
+        )
+
+        structural_tokens = self.keyword_tokenizer.tokenize(
+            structural_text
+        )
+
+        fact_tokens = self.keyword_tokenizer.tokenize(
             candidate.source_quote
         )
 
-        return self.keyword_scorer.score(
+        structural_score = self.keyword_scorer.score(
             query_tokens=question_tokens,
-            content_tokens=candidate_tokens,
+            content_tokens=structural_tokens,
+        )
+
+        fact_score = self.keyword_scorer.score(
+            query_tokens=question_tokens,
+            content_tokens=fact_tokens,
+        )
+
+        return (
+            structural_score * 0.7
+            + fact_score * 0.3
+        )
+
+    def _candidate_evidence_text(
+        self,
+        candidate: ExtractionCandidate,
+    ) -> str:
+        """Return structural and factual evidence used for lexical ranking."""
+
+        return " ".join(
+            part
+            for part in (
+                candidate.heading,
+                candidate.structural_context,
+                candidate.source_quote,
+            )
+            if part
         )
 
     def _get_question_tokens(

@@ -41,7 +41,10 @@ class OllamaService:
         response = chat(
             model=OLLAMA_MODEL,
             messages=messages,
-            format=response_format
+            format=response_format,
+            options={
+                "temperature": 0,
+            },
         )
 
         content = cast(

@@ -273,6 +273,57 @@ def test_unique_source_attribution_is_accepted() -> None:
     )
 
 
+def test_role_question_uses_candidate_heading_as_answer() -> None:
+    """Use the source heading as answer-bearing evidence for role questions."""
+
+    node = _create_node(
+        "Amod-Kumar.pdf",
+        "Professional Experience\n"
+        "Senior Engineering Manager, Cloudera (Oct 2022–Jun 2025)\n"
+        "● Led 25+ engineers including principal engineers, "
+        "architects, and managers across India, US and Europe.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1")
+    ).extract(
+        question="What was Amod's role at Cloudera?",
+        knowledge_nodes=[node],
+    )
+
+    assert len(knowledge.facts) == 1
+
+    assert (
+        knowledge.facts[0].value
+        == "Senior Engineering Manager, Cloudera (Oct 2022–Jun 2025)"
+    )
+
+
+def test_did_question_continues_to_use_candidate_fact() -> None:
+    """Use the source fact as answer-bearing evidence for activity questions."""
+
+    node = _create_node(
+        "Amod-Kumar.pdf",
+        "Engineering Manager, 24[7].ai (Mar 2021–Sep 2022)\n"
+        "● Led AI-powered customer engagement platforms.",
+    )
+
+    knowledge = _create_extractor(
+        _response("C1_1")
+    ).extract(
+        question="What did Amod do at 24[7].ai?",
+        knowledge_nodes=[node],
+    )
+
+    assert len(knowledge.facts) == 1
+
+    assert (
+        knowledge.facts[0].value
+        == "Led AI-powered customer engagement platforms."
+    )
+
+
+
 def test_unsupported_facts_are_rejected() -> None:
     """Reject candidate IDs that do not exist in the source set."""
 
@@ -1188,4 +1239,19 @@ def test_supported_semantic_fact_selects_source_evidence() -> None:
             "Sparse vegetation cover, often due to deforestation, "
             "also leaves the land exposed."
         )
+    )
+
+def test_question_analyzer_identifies_role_question():
+    analyzer = ExtractionQuestionAnalyzer()
+
+    assert analyzer.is_role_question(
+        "What was Amod's role at Cloudera?"
+    )
+
+
+def test_question_analyzer_does_not_identify_do_question_as_role_question():
+    analyzer = ExtractionQuestionAnalyzer()
+
+    assert not analyzer.is_role_question(
+        "What did Amod do at Cloudera?"
     )

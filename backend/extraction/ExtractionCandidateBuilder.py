@@ -1208,11 +1208,35 @@ class ExtractionCandidateBuilder:
         )
 
 
+    def _split_structural_segments(
+        self,
+        text: str,
+    ) -> list[str]:
+        """Split source text into structural segments around embedded bullets."""
+
+        normalized = self._normalize_whitespace(
+            text
+        )
+
+        if not normalized:
+            return []
+
+        segments = re.split(
+            r"\s+(?=●|•|▪|◦|‣|[-*])\s*",
+            normalized,
+        )
+
+        return [
+            segment.strip()
+            for segment in segments
+            if segment.strip()
+        ]
+
     def _extract_structural_headings(
         self,
         prefix: str,
     ) -> list[str]:
-        """Extract structurally separate headings preceding a candidate."""
+        """Extract the current structural heading context before a candidate."""
 
         if not prefix.strip():
             return []
@@ -1227,12 +1251,15 @@ class ExtractionCandidateBuilder:
         headings: list[str] = []
 
         for line in lines:
-            if self._looks_like_heading(
+            segments = self._split_structural_segments(
                 line
-            ):
-                headings.append(
-                    line
-                )
+            )
+
+            for segment in segments:
+                if self._looks_like_heading(
+                    segment
+                ):
+                    headings = [segment]
 
         return self._deduplicate_adjacent(
             headings
