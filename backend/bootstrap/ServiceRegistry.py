@@ -25,6 +25,7 @@ from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.config.settings import DOCUMENTS_DIR
 from backend.extraction.AnswerGenerator import AnswerGenerator
 from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+from backend.extraction.EvidenceSelectionSafetyGate import EvidenceSelectionSafetyGate
 from backend.extraction.EvidenceSignalDetector import EvidenceSignalDetector
 from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
 from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
@@ -146,7 +147,6 @@ class ServiceRegistry:
         )
 
         self.embedding_service = EmbeddingService()
-
         self.keyword_tokenizer = KeywordTokenizer()
         self.keyword_scorer = KeywordScorer()
 
@@ -162,25 +162,22 @@ class ServiceRegistry:
         )
 
         self.ollama_service = OllamaService()
-
         knowledge_schema = KnowledgeSchema()
-
         extraction_prompt_builder = ExtractionPromptBuilder()
-
         source_quote_validator = SourceQuoteValidator()
-
         response_parser = ExtractionResponseParser()
-
         candidate_builder = ExtractionCandidateBuilder()
-
         question_analyzer = ExtractionQuestionAnalyzer()
-
         evidence_signal_detector = EvidenceSignalDetector()
 
         candidate_ranker = ExtractionCandidateRanker(
             keyword_tokenizer=self.keyword_tokenizer,
             keyword_scorer=self.keyword_scorer,
             evidence_signal_detector=evidence_signal_detector,
+        )
+
+        evidence_selection_safety_gate = EvidenceSelectionSafetyGate(
+            keyword_tokenizer=self.keyword_tokenizer,
         )
 
         self.knowledge_extractor = KnowledgeExtractor(
@@ -193,6 +190,7 @@ class ServiceRegistry:
             candidate_builder=candidate_builder,
             question_analyzer=question_analyzer,
             candidate_ranker=candidate_ranker,
+            evidence_selection_safety_gate=evidence_selection_safety_gate,
         )
 
         self.answer_generator = AnswerGenerator(
@@ -201,21 +199,13 @@ class ServiceRegistry:
         )
 
         self.execution_monitor = ExecutionMonitor()
-
         self.intent_classifier = IntentClassifier()
-
         self.execution_planner = ExecutionPlanner()
-
         self.response_builder = ResponseBuilder()
-
         self.conversation_memory = ConversationMemory()
-
         self.answer_formatter_service = AnswerFormatterService()
-
         self.compliance_checklist_service = ComplianceChecklistService()
-
         self.business_profile_session = BusinessProfileSession()
-
         self.candidate_filter = CandidateFilter()
 
 

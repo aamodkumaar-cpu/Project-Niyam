@@ -6,6 +6,7 @@ Purpose:
     and deterministic candidate selection.
 """
 
+from backend.extraction.EvidenceSelectionSafetyGate import EvidenceSelectionSafetyGate
 from backend.extraction.ExtractionCandidateBuilder import ExtractionCandidateBuilder
 from backend.extraction.ExtractionPromptBuilder import ExtractionPromptBuilder
 from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
@@ -126,6 +127,9 @@ def _create_extractor(
             keyword_tokenizer=KeywordTokenizer(),
             keyword_scorer=KeywordScorer(),
             evidence_signal_detector=EvidenceSignalDetector(),
+        ),
+        evidence_selection_safety_gate=EvidenceSelectionSafetyGate(
+            keyword_tokenizer=KeywordTokenizer(),
         ),
     )
 

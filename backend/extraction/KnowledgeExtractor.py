@@ -2,25 +2,22 @@
 Knowledge Extractor.
 
 Type:
-
     Domain Service
 
 Purpose:
-
     Select source-grounded knowledge from deterministic extraction candidates.
 
 Responsibilities:
-
     - Analyze extraction question constraints.
     - Build deterministic extraction candidates.
     - Rank candidates at fact level.
+    - Apply explicit evidence-selection safety constraints.
     - Ask the LLM to select supporting candidates.
     - Validate selected source evidence.
     - Enforce deterministic extraction constraints.
     - Produce structured knowledge.
 
 Does NOT:
-
     - Retrieve knowledge.
     - Generate final natural-language answers.
     - Invent factual content.
@@ -28,13 +25,21 @@ Does NOT:
 
 from __future__ import annotations
 
-from backend.diagnostic.ExecutionDebuggerContract import ExecutionDebuggerContract
+from backend.diagnostic.ExecutionDebuggerContract import (
+    ExecutionDebuggerContract,
+)
+from backend.extraction.EvidenceSelectionSafetyGate import (
+    EvidenceSelectionSafetyGate,
+)
 from backend.extraction.ExtractionCandidate import ExtractionCandidate
 from backend.extraction.ExtractionCandidateBuilder import (
     ExtractionCandidateBuilder,
 )
 from backend.extraction.ExtractionCandidateRanker import (
     ExtractionCandidateRanker,
+)
+from backend.extraction.ExtractionPromptBuilder import (
+    ExtractionPromptBuilder,
 )
 from backend.extraction.ExtractionQuestionAnalyzer import (
     ExtractionQuestionAnalyzer,
@@ -45,20 +50,21 @@ from backend.extraction.ExtractionResponseParser import (
 )
 from backend.extraction.KnowledgeFact import KnowledgeFact
 from backend.extraction.KnowledgeSchema import KnowledgeSchema
-from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
+from backend.extraction.SourceQuoteValidator import (
+    SourceQuoteValidator,
+)
+from backend.extraction.StructuredKnowledge import StructuredKnowledge
 from backend.llm.LLMClient import LLMClient
 from backend.llm.Message import Messages
 from backend.retrieval.KnowledgeNode import KnowledgeNode
-from backend.extraction.StructuredKnowledge import StructuredKnowledge
-
 
 
 class KnowledgeExtractor:
-    """Selects structured knowledge from deterministic source candidates."""
+    """Select structured knowledge from deterministic source candidates."""
 
     def __init__(
         self,
-        prompt_builder,
+        prompt_builder: ExtractionPromptBuilder,
         llm_client: LLMClient,
         execution_debugger: ExecutionDebuggerContract,
         knowledge_schema: KnowledgeSchema,
@@ -67,6 +73,7 @@ class KnowledgeExtractor:
         candidate_builder: ExtractionCandidateBuilder,
         question_analyzer: ExtractionQuestionAnalyzer,
         candidate_ranker: ExtractionCandidateRanker,
+        evidence_selection_safety_gate: EvidenceSelectionSafetyGate,
     ) -> None:
         """Initialize the knowledge extractor."""
 
@@ -79,6 +86,9 @@ class KnowledgeExtractor:
         self.candidate_builder = candidate_builder
         self.question_analyzer = question_analyzer
         self.candidate_ranker = candidate_ranker
+        self.evidence_selection_safety_gate = (
+            evidence_selection_safety_gate
+        )
 
     def extract(
         self,
@@ -99,12 +109,6 @@ class KnowledgeExtractor:
             )
         )
 
-        evidence_requirement = (
-            self.question_analyzer.determine_evidence_requirement(
-                question
-            )
-        )
-
         candidates = self.candidate_builder.build(
             knowledge_nodes=knowledge_nodes,
             relationship=relationship,
@@ -113,17 +117,35 @@ class KnowledgeExtractor:
         if not candidates:
             return StructuredKnowledge()
 
+        evidence_requirement = (
+            self.question_analyzer.determine_evidence_requirement(
+                question
+            )
+        )
+
         ranked_candidates = self.candidate_ranker.rank(
             question=question,
             candidates=candidates,
             evidence_requirement=evidence_requirement,
         )
 
-        prompt_candidates = self.candidate_ranker.select_for_prompt(
-            question=question,
-            candidates=ranked_candidates,
-            evidence_requirement=evidence_requirement,
+        safe_candidates = (
+            self.evidence_selection_safety_gate.filter(
+                question=question,
+                candidates=ranked_candidates,
+            )
         )
+
+        prompt_candidates = (
+            self.candidate_ranker.select_for_prompt(
+                question=question,
+                candidates=safe_candidates,
+                evidence_requirement=evidence_requirement,
+            )
+        )
+
+        if not prompt_candidates:
+            return StructuredKnowledge()
 
         messages: Messages = self.prompt_builder.build(
             question=question,
@@ -158,7 +180,8 @@ class KnowledgeExtractor:
 
         knowledge = self._build_structured_knowledge(
             selections=selections,
-            candidates=candidates,
+            candidates=ranked_candidates,
+            allowed_candidates=safe_candidates,
             question=question,
             role_question=role_question,
         )
@@ -173,6 +196,7 @@ class KnowledgeExtractor:
         self,
         selections: list[ExtractionSelection],
         candidates: list[ExtractionCandidate],
+        allowed_candidates: list[ExtractionCandidate],
         question: str,
         role_question: bool,
     ) -> StructuredKnowledge:
@@ -181,6 +205,11 @@ class KnowledgeExtractor:
         candidate_map = {
             candidate.candidate_id: candidate
             for candidate in candidates
+        }
+
+        allowed_candidate_ids = {
+            candidate.candidate_id
+            for candidate in allowed_candidates
         }
 
         maximum = (
@@ -204,6 +233,7 @@ class KnowledgeExtractor:
             selections=selections,
             candidates=candidates,
             candidate_map=candidate_map,
+            allowed_candidate_ids=allowed_candidate_ids,
             knowledge=knowledge,
             selected_ids=selected_ids,
             heading_counts=heading_counts,
@@ -213,7 +243,7 @@ class KnowledgeExtractor:
 
         if exhaustive:
             self._complete_exhaustive_selection(
-                candidates=candidates,
+                candidates=allowed_candidates,
                 knowledge=knowledge,
                 selected_ids=selected_ids,
                 heading_counts=heading_counts,
@@ -227,77 +257,61 @@ class KnowledgeExtractor:
         selections: list[ExtractionSelection],
         candidates: list[ExtractionCandidate],
         candidate_map: dict[str, ExtractionCandidate],
+        allowed_candidate_ids: set[str],
         knowledge: StructuredKnowledge,
         selected_ids: set[str],
         heading_counts: dict[str, int],
         maximum: int | None,
         role_question: bool,
     ) -> None:
-        """Accept valid candidates selected by the LLM."""
+        """Accept valid, grounded, authorized LLM selections."""
 
         for selection in selections:
             candidate_id = selection["candidate_id"]
 
+            if candidate_id not in candidate_map:
+                continue
+
+            if candidate_id not in allowed_candidate_ids:
+                continue
+
+            candidate = candidate_map[candidate_id]
+
             if candidate_id in selected_ids:
                 continue
 
-            candidate = candidate_map.get(
-                candidate_id
-            )
+            if maximum is not None:
+                current_count = heading_counts.get(
+                    candidate.heading,
+                    0,
+                )
 
-            if candidate is None:
-                continue
-
-            heading = self._candidate_heading(
-                candidate
-            )
-
-            count = heading_counts.get(
-                heading,
-                0,
-            )
-
-            if (
-                maximum is not None
-                and count >= maximum
-            ):
-                continue
+                if current_count >= maximum:
+                    continue
 
             if self._is_ambiguous_candidate(
                 candidate=candidate,
                 candidates=candidates,
             ):
-                self._reject(
-                    candidate=candidate,
-                    confidence=selection["confidence"],
-                )
                 continue
 
             if not self.source_quote_validator.is_supported(
                 source_quote=candidate.source_quote,
-                source_text=candidate.node.content,
+                source_text=candidate.source_text,
             ):
-                self._reject(
-                    candidate=candidate,
-                    confidence=selection["confidence"],
-                )
                 continue
+
+            value = (
+                candidate.heading
+                if role_question
+                else candidate.source_quote
+            )
 
             fact = self._create_fact(
                 candidate=candidate,
                 confidence=selection["confidence"],
-                value=(
-                    self._candidate_heading(candidate)
-                    if role_question
-                    else candidate.source_quote
-                ),
+                value=value,
             )
-
-            if self._is_duplicate(
-                fact=fact,
-                knowledge=knowledge,
-            ):
-                continue
 
             knowledge.facts.append(
                 fact
@@ -307,8 +321,12 @@ class KnowledgeExtractor:
                 candidate_id
             )
 
-            heading_counts[heading] = (
-                count + 1
+            heading_counts[candidate.heading] = (
+                heading_counts.get(
+                    candidate.heading,
+                    0,
+                )
+                + 1
             )
 
     def _complete_exhaustive_selection(
@@ -374,22 +392,20 @@ class KnowledgeExtractor:
 
                 if not self.source_quote_validator.is_supported(
                     source_quote=candidate.source_quote,
-                    source_text=candidate.node.content,
+                    source_text=candidate.source_text,
                 ):
                     continue
 
                 fact = self._create_fact(
                     candidate=candidate,
                     confidence=1.0,
+                    value=candidate.source_quote,
                 )
 
                 if self._is_duplicate(
                     fact=fact,
                     knowledge=knowledge,
                 ):
-                    selected_ids.add(
-                        candidate.candidate_id
-                    )
                     continue
 
                 knowledge.facts.append(
@@ -406,79 +422,66 @@ class KnowledgeExtractor:
                     current_count
                 )
 
-    def _create_fact(
-        self,
-        candidate: ExtractionCandidate,
-        confidence: float,
-        value: str | None = None,
-    ) -> KnowledgeFact:
-        """Create a source-grounded knowledge fact from a candidate."""
-
-        return KnowledgeFact(
-            name=self._candidate_heading(
-                candidate
-            ),
-            value=(
-                value
-                if value is not None
-                else candidate.source_quote
-            ),
-            source=candidate.node.metadata.source,
-            page_number=candidate.node.metadata.page_number,
-            confidence=confidence,
-        )
-
     def _candidate_heading(
         self,
         candidate: ExtractionCandidate,
     ) -> str:
-        """Return the candidate's structural heading."""
+        """Return the source-owned heading for a candidate."""
 
-        heading = candidate.heading.strip()
-
-        if heading:
-            return heading
-
-        return candidate.node.metadata.source
+        return candidate.heading
 
     def _is_ambiguous_candidate(
         self,
         candidate: ExtractionCandidate,
         candidates: list[ExtractionCandidate],
     ) -> bool:
-        """Return whether identical evidence exists at multiple locations."""
+        """Return whether identical evidence has multiple source locations."""
 
-        normalized_quote = " ".join(
-            candidate.source_quote.split()
-        )
-
-        identities = {
-            (
-                other.node.metadata.document_id,
-                other.node.metadata.page_number,
-                other.node.metadata.chunk_number,
-            )
+        matches = [
+            other
             for other in candidates
-            if " ".join(
-                other.source_quote.split()
-            ) == normalized_quote
-        }
+            if (
+                other.source_quote == candidate.source_quote
+                and (
+                    other.source != candidate.source
+                    or (
+                        other.source == candidate.source
+                        and other.page_number != candidate.page_number
+                    )
+                )
+            )
+        ]
 
-        return len(identities) > 1
+        return bool(matches)
 
     def _is_duplicate(
         self,
         fact: KnowledgeFact,
         knowledge: StructuredKnowledge,
     ) -> bool:
-        """Return whether an equivalent source fact is already present."""
+        """Return whether the fact is already present."""
 
         return any(
-            existing.name == fact.name
-            and existing.value == fact.value
+            existing.value == fact.value
             and existing.source == fact.source
             and existing.page_number == fact.page_number
             for existing in knowledge.facts
+        )
+
+    def _create_fact(
+        self,
+        candidate: ExtractionCandidate,
+        confidence: float,
+        value: str,
+    ) -> KnowledgeFact:
+        """Create a source-owned knowledge fact."""
+
+        return KnowledgeFact(
+            name=self._candidate_heading(candidate),
+            value=value,
+            source=candidate.source,
+            page_number=candidate.page_number,
+            confidence=confidence,
         )
 
     def _reject(
@@ -488,14 +491,14 @@ class KnowledgeExtractor:
     ) -> None:
         """Record a rejected candidate for diagnostics."""
 
+        fact = KnowledgeFact(
+            name=self._candidate_heading(candidate),
+            value=candidate.source_quote,
+            source=candidate.source,
+            page_number=candidate.page_number,
+            confidence=confidence,
+        )
+
         self.execution_debugger.rejected_fact(
-            KnowledgeFact(
-                name=self._candidate_heading(
-                    candidate
-                ),
-                value=candidate.source_quote,
-                source=candidate.node.metadata.source,
-                page_number=candidate.node.metadata.page_number,
-                confidence=confidence,
-            )
+            fact
         )
