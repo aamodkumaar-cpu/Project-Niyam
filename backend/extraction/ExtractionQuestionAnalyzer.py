@@ -8,10 +8,11 @@ Type:
 Purpose:
 
     Analyze extraction questions and identify deterministic
-    candidate-selection constraints.
+    evidence requirements.
 
 Responsibilities:
 
+    - Identify evidence characteristics required by a question.
     - Identify role questions.
     - Identify relationship or synthesis questions.
     - Identify exhaustive requests.
@@ -30,15 +31,38 @@ from __future__ import annotations
 
 import re
 
+from backend.extraction.EvidenceRequirement import EvidenceRequirement
+
 
 class ExtractionQuestionAnalyzer:
-    """Analyze deterministic constraints expressed by an extraction question."""
+    """Analyze deterministic evidence requirements expressed by a question."""
+
+    def determine_evidence_requirement(
+        self,
+        question: str,
+    ) -> EvidenceRequirement:
+        """Determine the evidence characteristics required by a question."""
+
+        normalized = question.lower().strip()
+
+        return EvidenceRequirement(
+            direct_answer_required=True,
+            quantity_required=self._requires_quantity(
+                normalized
+            ),
+            temporal_value_required=self._requires_temporal_value(
+                normalized
+            ),
+            relationship_required=self.is_relationship_question(
+                normalized
+            ),
+        )
 
     def is_role_question(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question asks for a person's role."""
+        """Return whether the question asks for a role or position."""
 
         normalized = question.lower().strip()
 
@@ -110,7 +134,8 @@ class ExtractionQuestionAnalyzer:
 
             r"\bevery\s+(?:item|point|fact|cause|reason|way|type|example|factor)\b",
 
-            r"\bfrom\s+all\s+(?:the\s+)?(?:items?|sources?|documents?|companies?|roles?|headings?)\b",
+            r"\bfrom\s+all\s+(?:the\s+)?(?:items?|sources?|documents?|"
+            r"companies?|roles?|headings?)\b",
 
             r"\bfrom\s+each\s+(?:item|source|document)\b",
 
@@ -157,3 +182,30 @@ class ExtractionQuestionAnalyzer:
                 return maximum
 
         return None
+
+    def _requires_quantity(
+        self,
+        question: str,
+    ) -> bool:
+        """Return whether the question explicitly requires quantity evidence."""
+
+        return bool(
+            re.search(
+                r"\b(?:how\s+many|how\s+much|number\s+of|total)\b",
+                question,
+            )
+        )
+
+    def _requires_temporal_value(
+        self,
+        question: str,
+    ) -> bool:
+        """Return whether the question requires temporal evidence."""
+
+        return bool(
+            re.search(
+                r"\b(?:experience|duration|how\s+long|"
+                r"years?|months?|tenure|since|when)\b",
+                question,
+            )
+        )

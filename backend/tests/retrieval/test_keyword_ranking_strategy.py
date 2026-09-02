@@ -133,3 +133,25 @@ def test_keyword_score_is_not_treated_as_semantic_distance() -> None:
     assert ranked[0].semantic_distance is None
     assert ranked[0].keyword_score > 0.0
     assert ranked[0].keyword_score <= 1.0
+
+def test_keyword_evidence_beats_unrelated_semantic_candidate() -> None:
+    """Ensure lexical evidence prevents unrelated semantic candidates from dominating."""
+
+    cloudera = _create_node(
+        content="Cloudera platform modernization and cloud cost reduction.",
+        document_id="cloudera",
+        semantic_distance=0.9,
+    )
+
+    unrelated = _create_node(
+        content="Dust storms are caused by strong winds and dry soil.",
+        document_id="textbook",
+        semantic_distance=0.94,
+    )
+
+    ranked = _create_ranking_strategy().rank(
+        question="What did Amod accomplish at Cloudera?",
+        candidates=[unrelated, cloudera],
+    )
+
+    assert ranked[0].metadata.document_id == "cloudera"

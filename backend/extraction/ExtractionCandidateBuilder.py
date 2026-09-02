@@ -286,13 +286,27 @@ class ExtractionCandidateBuilder:
         if not normalized_text:
             return []
 
+        # Protect common abbreviation punctuation from being
+        # interpreted as sentence boundaries.
+        protected = re.sub(
+            r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|Rs)\.",
+            lambda match: match.group(0).replace(".", "<DOT>"),
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
         fragments: list[str] = []
 
         for fragment in self._SENTENCE_PATTERN.split(
-            normalized_text
+            protected
         ):
+            normalized = fragment.replace(
+                "<DOT>",
+                ".",
+            )
+
             normalized = self._normalize_whitespace(
-                fragment
+                normalized
             )
 
             if not normalized:

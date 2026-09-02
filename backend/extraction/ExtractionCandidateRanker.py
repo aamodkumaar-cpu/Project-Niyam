@@ -1,74 +1,107 @@
 """
-Extraction Candidate Ranker.
-
 Type:
-
     Domain Service
 
 Purpose:
-
-    Rank extraction candidates using deterministic lexical evidence and
-    select a bounded evidence set for LLM processing.
+    Rank extraction candidates using deterministic lexical relevance
+    and generic evidence characteristics.
 
 Responsibilities:
-
     - Calculate candidate-level lexical relevance.
-    - Include structural scope when calculating relevance.
+    - Use structural scope to establish question relevance.
+    - Evaluate generic evidence characteristics through EvidenceSignalDetector.
     - Rank candidates deterministically.
-    - Retain candidates with meaningful relative relevance.
-    - Bound the number of candidates sent to the LLM.
+    - Select a bounded evidence set for LLM processing.
 
 Does NOT:
-
-    - Call the LLM.
+    - Retrieve knowledge.
     - Interpret facts.
     - Validate source evidence.
+    - Call the LLM.
     - Generate answers.
 """
 
 from __future__ import annotations
 
-from backend.extraction.ExtractionCandidate import ExtractionCandidate
+from backend.extraction.EvidenceRequirement import (
+    EvidenceRequirement,
+)
+from backend.extraction.EvidenceSignalDetector import (
+    EvidenceSignalDetector,
+)
+from backend.extraction.ExtractionCandidate import (
+    ExtractionCandidate,
+)
 from backend.retrieval.KeywordScorer import KeywordScorer
 from backend.retrieval.KeywordTokenizer import KeywordTokenizer
 
 
 class ExtractionCandidateRanker:
-    """Rank extraction candidates using deterministic lexical relevance."""
+    """Rank extraction candidates using deterministic evidence relevance."""
 
     _KEYWORD_STOP_WORDS: frozenset[str] = frozenset(
         {
+            "the",
             "a",
             "an",
             "and",
-            "are",
-            "as",
-            "at",
-            "be",
-            "by",
-            "for",
-            "from",
-            "how",
-            "in",
-            "is",
-            "it",
-            "of",
-            "on",
             "or",
-            "that",
-            "the",
-            "their",
-            "this",
-            "to",
+            "is",
+            "are",
+            "was",
+            "were",
             "what",
-            "when",
-            "where",
             "which",
             "who",
+            "where",
+            "when",
+            "how",
             "why",
+            "did",
+            "does",
+            "do",
+            "has",
+            "have",
+            "had",
             "with",
+            "for",
+            "from",
+            "about",
+            "tell",
+            "me",
+            "all",
+            "any",
             "each",
+            "every",
             "other",
+            "their",
+            "its",
+            "his",
+            "her",
+            "this",
+            "that",
+            "these",
+            "those",
+            "can",
+            "could",
+            "would",
+            "should",
+            "be",
+            "been",
+            "being",
+            "to",
+            "of",
+            "in",
+            "on",
+            "at",
+            "by",
+            "as",
+            "into",
+            "during",
+            "through",
+            "than",
+            "also",
+            "related",
             "associated",
         }
     )
@@ -77,13 +110,15 @@ class ExtractionCandidateRanker:
         self,
         keyword_tokenizer: KeywordTokenizer,
         keyword_scorer: KeywordScorer,
+        evidence_signal_detector: EvidenceSignalDetector,
         maximum_candidates: int = 20,
         minimum_relative_score: float = 0.50,
     ) -> None:
-        """Initialize the extraction candidate ranker."""
+        """Initialize the candidate ranker."""
 
         self.keyword_tokenizer = keyword_tokenizer
         self.keyword_scorer = keyword_scorer
+        self.evidence_signal_detector = evidence_signal_detector
         self.maximum_candidates = maximum_candidates
         self.minimum_relative_score = (
             minimum_relative_score
@@ -93,8 +128,9 @@ class ExtractionCandidateRanker:
         self,
         question: str,
         candidates: list[ExtractionCandidate],
+        evidence_requirement: EvidenceRequirement | None = None,
     ) -> list[ExtractionCandidate]:
-        """Return candidates ranked by deterministic lexical relevance."""
+        """Return candidates ranked by deterministic evidence relevance."""
 
         if not candidates:
             return []
@@ -106,6 +142,12 @@ class ExtractionCandidateRanker:
         if not question_tokens:
             return candidates
 
+        requirement = (
+            evidence_requirement
+            if evidence_requirement is not None
+            else EvidenceRequirement()
+        )
+
         scored: list[
             tuple[
                 float,
@@ -114,27 +156,27 @@ class ExtractionCandidateRanker:
             ]
         ] = []
 
-        for index, candidate in enumerate(
-            candidates
-        ):
+        for index, candidate in enumerate(candidates):
             score = self._score_candidate(
                 question_tokens=question_tokens,
                 candidate=candidate,
+                evidence_requirement=requirement,
             )
 
             scored.append(
                 (
                     score,
-                    index,
+                    -index,
                     candidate,
                 )
             )
 
         scored.sort(
             key=lambda item: (
-                -item[0],
+                item[0],
                 item[1],
-            )
+            ),
+            reverse=True,
         )
 
         return [
@@ -146,12 +188,14 @@ class ExtractionCandidateRanker:
         self,
         question: str,
         candidates: list[ExtractionCandidate],
+        evidence_requirement: EvidenceRequirement | None = None,
     ) -> list[ExtractionCandidate]:
-        """Return strongly relevant bounded candidates for the LLM."""
+        """Return a bounded set of highest-ranked candidates for the LLM."""
 
         ranked = self.rank(
             question=question,
             candidates=candidates,
+            evidence_requirement=evidence_requirement,
         )
 
         if not ranked:
@@ -166,11 +210,18 @@ class ExtractionCandidateRanker:
                 :self.maximum_candidates
             ]
 
+        requirement = (
+            evidence_requirement
+            if evidence_requirement is not None
+            else EvidenceRequirement()
+        )
+
         scored = [
             (
                 self._score_candidate(
                     question_tokens=question_tokens,
                     candidate=candidate,
+                    evidence_requirement=requirement,
                 ),
                 candidate,
             )
@@ -199,13 +250,13 @@ class ExtractionCandidateRanker:
             :self.maximum_candidates
         ]
 
-
     def _score_candidate(
         self,
         question_tokens: list[str],
         candidate: ExtractionCandidate,
+        evidence_requirement: EvidenceRequirement | None = None,
     ) -> float:
-        """Return lexical relevance of one extraction candidate."""
+        """Return deterministic relevance of one extraction candidate."""
 
         structural_text = " ".join(
             part
@@ -216,12 +267,16 @@ class ExtractionCandidateRanker:
             if part
         )
 
-        structural_tokens = self.keyword_tokenizer.tokenize(
-            structural_text
+        structural_tokens = (
+            self.keyword_tokenizer.tokenize(
+                structural_text
+            )
         )
 
-        fact_tokens = self.keyword_tokenizer.tokenize(
-            candidate.source_quote
+        fact_tokens = (
+            self.keyword_tokenizer.tokenize(
+                candidate.source_quote
+            )
         )
 
         structural_score = self.keyword_scorer.score(
@@ -234,16 +289,49 @@ class ExtractionCandidateRanker:
             content_tokens=fact_tokens,
         )
 
-        return (
+        score = (
             structural_score * 0.7
             + fact_score * 0.3
         )
+
+        if evidence_requirement is None:
+            return score
+
+        evidence_text = self._candidate_evidence_text(
+            candidate
+        )
+
+        if (
+            evidence_requirement.quantity_required
+            and self.evidence_signal_detector.has_quantity(
+                evidence_text
+            )
+        ):
+            score += 0.15
+
+        if (
+            evidence_requirement.temporal_value_required
+            and self.evidence_signal_detector.has_temporal_value(
+                evidence_text
+            )
+        ):
+            score += 0.15
+
+        if (
+            evidence_requirement.relationship_required
+            and self.evidence_signal_detector.has_relationship(
+                evidence_text
+            )
+        ):
+            score += 0.15
+
+        return score
 
     def _candidate_evidence_text(
         self,
         candidate: ExtractionCandidate,
     ) -> str:
-        """Return structural and factual evidence used for lexical ranking."""
+        """Return structural and factual evidence used for signal detection."""
 
         return " ".join(
             part
@@ -259,7 +347,7 @@ class ExtractionCandidateRanker:
         self,
         question: str,
     ) -> list[str]:
-        """Return meaningful normalized question tokens."""
+        """Return meaningful tokens from the extraction question."""
 
         tokens = self.keyword_tokenizer.tokenize(
             question

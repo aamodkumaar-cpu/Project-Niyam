@@ -25,6 +25,7 @@ from backend.compliance.BusinessProfileSession import BusinessProfileSession
 from backend.config.settings import DOCUMENTS_DIR
 from backend.extraction.AnswerGenerator import AnswerGenerator
 from backend.extraction.AnswerPromptBuilder import AnswerPromptBuilder
+from backend.extraction.EvidenceSignalDetector import EvidenceSignalDetector
 from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
 from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
 from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
@@ -174,9 +175,12 @@ class ServiceRegistry:
 
         question_analyzer = ExtractionQuestionAnalyzer()
 
+        evidence_signal_detector = EvidenceSignalDetector()
+
         candidate_ranker = ExtractionCandidateRanker(
             keyword_tokenizer=self.keyword_tokenizer,
             keyword_scorer=self.keyword_scorer,
+            evidence_signal_detector=evidence_signal_detector,
         )
 
         self.knowledge_extractor = KnowledgeExtractor(

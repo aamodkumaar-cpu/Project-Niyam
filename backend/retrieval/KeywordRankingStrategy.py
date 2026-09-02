@@ -167,11 +167,8 @@ class KeywordRankingStrategy(RankingStrategy):
     ) -> float:
         """Combine semantic and keyword relevance deterministically."""
 
-        if keyword_relevance > 0.0:
-            return (
-                keyword_relevance * 0.7
-            ) + (
-                semantic_relevance * 0.3
-            )
-
-        return semantic_relevance
+        return (
+            keyword_relevance * 0.7
+        ) + (
+            semantic_relevance * 0.3
+        )

@@ -23,6 +23,7 @@ from backend.retrieval.KnowledgeNode import KnowledgeNode
 
 from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
 from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
+from backend.extraction.EvidenceSignalDetector import EvidenceSignalDetector
 
 
 class FakeOllamaService:
@@ -124,6 +125,7 @@ def _create_extractor(
         candidate_ranker=ExtractionCandidateRanker(
             keyword_tokenizer=KeywordTokenizer(),
             keyword_scorer=KeywordScorer(),
+            evidence_signal_detector=EvidenceSignalDetector(),
         ),
     )
 

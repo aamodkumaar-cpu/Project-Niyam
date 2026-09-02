@@ -99,6 +99,12 @@ class KnowledgeExtractor:
             )
         )
 
+        evidence_requirement = (
+            self.question_analyzer.determine_evidence_requirement(
+                question
+            )
+        )
+
         candidates = self.candidate_builder.build(
             knowledge_nodes=knowledge_nodes,
             relationship=relationship,
@@ -110,11 +116,13 @@ class KnowledgeExtractor:
         ranked_candidates = self.candidate_ranker.rank(
             question=question,
             candidates=candidates,
+            evidence_requirement=evidence_requirement,
         )
 
         prompt_candidates = self.candidate_ranker.select_for_prompt(
             question=question,
             candidates=ranked_candidates,
+            evidence_requirement=evidence_requirement,
         )
 
         messages: Messages = self.prompt_builder.build(
