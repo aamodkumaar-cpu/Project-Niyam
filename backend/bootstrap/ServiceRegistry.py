@@ -31,6 +31,7 @@ from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRank
 from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
 from backend.extraction.ExtractionResponseParser import ExtractionResponseParser
 from backend.extraction.SourceQuoteValidator import SourceQuoteValidator
+from backend.extraction.StructuralScopeResolver import StructuralScopeResolver
 from backend.ingestion.DocumentCatalogRepository import DocumentCatalogRepository
 from backend.ingestion.DocumentService import DocumentService
 from backend.ingestion.IngestionService import IngestionService
@@ -167,8 +168,12 @@ class ServiceRegistry:
         source_quote_validator = SourceQuoteValidator()
         response_parser = ExtractionResponseParser()
         candidate_builder = ExtractionCandidateBuilder()
-        question_analyzer = ExtractionQuestionAnalyzer()
+
         evidence_signal_detector = EvidenceSignalDetector()
+        structural_scope_resolver = StructuralScopeResolver(
+            evidence_signal_detector=evidence_signal_detector,
+        )
+        question_analyzer = ExtractionQuestionAnalyzer()
 
         candidate_ranker = ExtractionCandidateRanker(
             keyword_tokenizer=self.keyword_tokenizer,
@@ -191,6 +196,7 @@ class ServiceRegistry:
             question_analyzer=question_analyzer,
             candidate_ranker=candidate_ranker,
             evidence_selection_safety_gate=evidence_selection_safety_gate,
+            structural_scope_resolver=structural_scope_resolver,
         )
 
         self.answer_generator = AnswerGenerator(

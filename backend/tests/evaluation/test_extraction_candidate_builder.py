@@ -368,3 +368,39 @@ def test_new_inline_heading_replaces_previous_structural_context():
         candidates[1].structural_context
         == "Second Role (2021–2022)"
     )
+
+
+def test_sibling_inline_headings_replace_previous_heading() -> None:
+    """Replace a sibling heading without inheriting the previous heading."""
+
+    node = _node(
+        "Section A\n"
+        "First Role (2020–2021) ● First factual statement.\n"
+        "Second Role (2021–2022) ● Second factual statement."
+    )
+
+    candidates = ExtractionCandidateBuilder().build(
+        [node]
+    )
+
+    assert len(candidates) == 2
+
+    assert candidates[0].heading == (
+        "First Role (2020–2021)"
+    )
+
+    assert candidates[0].source_quote == (
+        "First factual statement."
+    )
+
+    assert candidates[1].heading == (
+        "Second Role (2021–2022)"
+    )
+
+    assert candidates[1].source_quote == (
+        "Second factual statement."
+    )
+
+    assert candidates[1].structural_context == (
+        "Second Role (2021–2022)"
+    )

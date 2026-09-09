@@ -24,6 +24,9 @@ from backend.extraction.EvidenceSignalDetector import (
 from backend.extraction.ExtractionCandidate import (
     ExtractionCandidate,
 )
+from backend.extraction.StructuralScopeResolver import (
+    StructuralScopeResolver,
+)
 from backend.retrieval.DocumentMetadata import DocumentMetadata
 from backend.retrieval.KeywordScorer import KeywordScorer
 from backend.retrieval.KeywordTokenizer import KeywordTokenizer
@@ -62,7 +65,12 @@ class FakeDebugger:
 class FakePromptBuilder:
     """Build a minimal prompt for the fake LLM."""
 
-    def build(self, question, candidates):
+    def build(
+        self,
+        question,
+        candidates,
+        evidence_requirement=None,
+    ):
         """Return the extraction messages."""
 
         return [
@@ -114,6 +122,9 @@ def _extractor(
         ),
         evidence_selection_safety_gate=EvidenceSelectionSafetyGate(
             keyword_tokenizer=KeywordTokenizer(),
+        ),
+        structural_scope_resolver=StructuralScopeResolver(
+            evidence_signal_detector=EvidenceSignalDetector(),
         ),
     )
 

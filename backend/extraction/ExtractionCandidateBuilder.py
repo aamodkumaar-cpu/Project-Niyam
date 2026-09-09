@@ -79,6 +79,7 @@ class ExtractionCandidateBuilder:
 
         return candidates
 
+    
     def _build_node_candidates(
         self,
         node_index: int,
@@ -120,14 +121,25 @@ class ExtractionCandidateBuilder:
         for match_index, match in enumerate(
             matches
         ):
-            prefix = source[:match.start()]
+            if match_index == 0:
+                prefix = source[:match.start()]
+            else:
+                prefix = source[
+                    matches[match_index - 1].end():match.start()
+                ]
 
             headings = self._extract_structural_headings(
                 prefix
             )
 
             if headings:
-                structural_context = headings
+                if match_index == 0:
+                    structural_context = headings
+                else:
+                    structural_context = (
+                        structural_context[:-1]
+                        + [headings[-1]]
+                    )
 
             start = match.end()
 
@@ -196,6 +208,8 @@ class ExtractionCandidateBuilder:
 
         return candidates
 
+
+
     def _build_non_bullet_candidate(
         self,
         node_index: int,
@@ -258,8 +272,6 @@ class ExtractionCandidateBuilder:
 
         return candidates
 
-
-
     def _split_atomic_fragments(
         self,
         text: str,
@@ -286,11 +298,12 @@ class ExtractionCandidateBuilder:
         if not normalized_text:
             return []
 
-        # Protect common abbreviation punctuation from being
-        # interpreted as sentence boundaries.
         protected = re.sub(
             r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|Rs)\.",
-            lambda match: match.group(0).replace(".", "<DOT>"),
+            lambda match: match.group(0).replace(
+                ".",
+                "<DOT>",
+            ),
             normalized_text,
             flags=re.IGNORECASE,
         )
@@ -331,9 +344,6 @@ class ExtractionCandidateBuilder:
             )
 
         return fragments
-
-
-
 
     def _is_meaningful_candidate(
         self,
@@ -381,8 +391,6 @@ class ExtractionCandidateBuilder:
 
         return True
 
-
-
     def _find_embedded_label_sequence(
         self,
         words: list[str],
@@ -408,9 +416,6 @@ class ExtractionCandidateBuilder:
                 return index
 
         return None
-
-
-
 
     def _find_embedded_diagram_boundary(
         self,
@@ -450,8 +455,6 @@ class ExtractionCandidateBuilder:
             if len(suffix_words) < 3:
                 continue
 
-            # A lowercase suffix is normally a continuation of
-            # the preceding prose rather than a new non-prose block.
             if suffix_words[0][0].islower():
                 continue
 
@@ -513,15 +516,9 @@ class ExtractionCandidateBuilder:
             ):
                 continue
 
-
-            return len(
-                prefix
-            )
+            return len(prefix)
 
         return None
-
-
-
 
     def _remove_embedded_pdf_artifacts(
         self,
@@ -551,10 +548,6 @@ class ExtractionCandidateBuilder:
 
         cleaned_lines: list[str] = []
 
-        # ---------------------------------------------------------
-        # First handle embedded transitions inside a line.
-        # ---------------------------------------------------------
-
         normalized_text = self._normalize_whitespace(
             " ".join(lines)
         )
@@ -576,13 +569,7 @@ class ExtractionCandidateBuilder:
                 else []
             )
 
-        # ---------------------------------------------------------
-        # Then handle explicit PDF artifacts.
-        # ---------------------------------------------------------
-
         for line in lines:
-
-            # Generic InDesign / PDF extraction marker.
             chapter_marker = re.search(
                 r"\bchapter\s+\d+\.indd\b",
                 line,
@@ -601,7 +588,6 @@ class ExtractionCandidateBuilder:
 
                 break
 
-            # Generic figure / caption reference.
             figure_marker = re.search(
                 r"\bfig(?:ure)?\.?\s*\d+(?:\.\d+)*\b",
                 line,
@@ -630,7 +616,6 @@ class ExtractionCandidateBuilder:
             )
         )
 
-
     def _find_embedded_non_prose_boundary(
         self,
         lines: list[str],
@@ -647,10 +632,6 @@ class ExtractionCandidateBuilder:
         ):
             current = lines[index]
 
-            # ---------------------------------------------------------
-            # Embedded transition inside the current line.
-            # ---------------------------------------------------------
-
             embedded_boundary = (
                 self._find_embedded_diagram_boundary(
                     current
@@ -662,10 +643,6 @@ class ExtractionCandidateBuilder:
                     index,
                     embedded_boundary,
                 )
-
-            # ---------------------------------------------------------
-            # Complete-line PDF artifacts.
-            # ---------------------------------------------------------
 
             if self._is_pdf_artifact(
                 current.lower()
@@ -682,10 +659,6 @@ class ExtractionCandidateBuilder:
                     index,
                     0,
                 )
-
-            # ---------------------------------------------------------
-            # Detect a block of short non-prose fragments.
-            # ---------------------------------------------------------
 
             if not self._looks_like_non_prose_fragment(
                 current
@@ -747,8 +720,6 @@ class ExtractionCandidateBuilder:
 
         return None
 
-
-
     def _looks_like_non_prose_fragment(
         self,
         text: str,
@@ -779,10 +750,7 @@ class ExtractionCandidateBuilder:
 
         words = normalized.split()
 
-        # A single word or very short fragment can be part of a
-        # diagram, table, label, or other extracted visual content.
         return len(words) <= 6
-
 
     def _looks_like_prose_continuation(
         self,
@@ -809,7 +777,6 @@ class ExtractionCandidateBuilder:
         if not current_normalized:
             return False
 
-        # Strong grammatical continuation signals.
         if previous_normalized.endswith(
             (
                 ",",
@@ -846,14 +813,9 @@ class ExtractionCandidateBuilder:
             "by ",
         )
 
-        if current_lower.startswith(
+        return current_lower.startswith(
             continuation_prefixes
-        ):
-            return True
-
-        return False
-
-
+        )
 
     def _is_dangling_prose_suffix(
         self,
@@ -898,8 +860,6 @@ class ExtractionCandidateBuilder:
 
         return words[-1].lower() in dangling_words
 
-
-
     def _is_embedded_diagram_line(
         self,
         text: str,
@@ -918,8 +878,6 @@ class ExtractionCandidateBuilder:
         if len(words) > 10:
             return False
 
-        # Diagram labels frequently contain short noun phrases
-        # rather than complete sentences.
         if normalized.endswith(
             (".", "!", "?")
         ):
@@ -927,12 +885,9 @@ class ExtractionCandidateBuilder:
 
         lower = normalized.lower()
 
-        # Strong structural indicators of diagram labels.
         if ":" in normalized:
             return False
 
-        # Short fragments with multiple comma-separated labels
-        # are commonly extracted from diagrams.
         comma_parts = [
             part.strip()
             for part in normalized.split(",")
@@ -945,7 +900,6 @@ class ExtractionCandidateBuilder:
         ):
             return True
 
-        # Very short noun-phrase lines are possible diagram labels.
         if (
             2 <= len(words) <= 5
             and not lower.startswith(
@@ -963,7 +917,7 @@ class ExtractionCandidateBuilder:
 
         return False
 
-
+    
 
     def _is_diagram_artifact(
         self,
@@ -971,29 +925,44 @@ class ExtractionCandidateBuilder:
     ) -> bool:
         """Return whether text appears to be extracted diagram labels."""
 
-        normalized = " ".join(
-            text.split()
+        normalized = self._normalize_whitespace(
+            text
         )
 
         if not normalized:
             return True
 
-        # Typical diagram extraction such as:
-        #
-        # 1 2 3 4 5 Headland1 Sea arch2 ...
-        #
-        digit_count = sum(
-            character.isdigit()
-            for character in normalized
-        )
+        words = normalized.split()
 
-        if digit_count >= 3:
-            words = normalized.split()
+        # Numeric-heavy short fragments are more likely to be diagram labels
+        # than factual prose. Do not reject ordinary factual sentences merely
+        # because they contain percentages, dates, counts, or measurements.
+        numeric_words = 0
 
-            if len(words) <= 25:
-                return True
+        for word in words:
+            cleaned = word.strip(
+                ".,:;()[]{}%-+"
+            )
+
+            if cleaned.isdigit():
+                numeric_words += 1
+                continue
+
+            if re.fullmatch(
+                r"\d+(?:\.\d+)+",
+                cleaned,
+            ):
+                numeric_words += 1
+
+        if (
+            len(words) <= 12
+            and numeric_words >= 3
+            and numeric_words / len(words) >= 0.4
+        ):
+            return True
 
         return False
+    
 
     def _is_figure_reference(
         self,
@@ -1163,8 +1132,6 @@ class ExtractionCandidateBuilder:
 
         return normalized, ""
 
-
-
     def _split_structural_bullet_prefix(
         self,
         text: str,
@@ -1191,25 +1158,15 @@ class ExtractionCandidateBuilder:
             normalized[match.end():].strip(),
         )
 
-
-    def _split_prefix_at_last_bullet(
-        self,
-        text: str,
-    ) -> tuple[str, str]:
-        """Separate structural text from content at the last embedded bullet."""
-
-        normalized = self._normalize_whitespace(
-            text
-        )
+    
+    def _split_prefix_at_last_bullet(self, text: str) -> tuple[str, str]:
+        """Split text into content before and after the final bullet marker."""
+        normalized = self._normalize_whitespace(text)
 
         if not normalized:
             return "", ""
 
-        matches = list(
-            self._BULLET_PATTERN.finditer(
-                normalized
-            )
-        )
+        matches = list(self._BULLET_PATTERN.finditer(normalized))
 
         if not matches:
             return normalized, ""
@@ -1220,6 +1177,7 @@ class ExtractionCandidateBuilder:
             normalized[:match.start()].strip(),
             normalized[match.end():].strip(),
         )
+
 
 
     def _split_structural_segments(
@@ -1246,38 +1204,144 @@ class ExtractionCandidateBuilder:
             if segment.strip()
         ]
 
+
+
     def _extract_structural_headings(
         self,
         prefix: str,
     ) -> list[str]:
-        """Extract the current structural heading context before a candidate."""
+        """Extract the strongest trailing structural heading from a source prefix."""
 
         if not prefix.strip():
             return []
 
-        lines = self._prepare_lines(
-            prefix
-        )
+        lines = self._prepare_lines(prefix)
 
         if not lines:
             return []
 
-        headings: list[str] = []
+        for line in reversed(lines):
+            segments = self._split_structural_segments(line)
 
-        for line in lines:
-            segments = self._split_structural_segments(
-                line
-            )
-
-            for segment in segments:
-                if self._looks_like_heading(
+            for segment in reversed(segments):
+                normalized = self._normalize_layout_text(
                     segment
-                ):
-                    headings = [segment]
+                )
 
-        return self._deduplicate_adjacent(
-            headings
+                if not normalized:
+                    continue
+
+                # First try to recover a trailing structural heading from
+                # flattened prose. PDF extraction can merge the final prose
+                # sentence and the following heading onto one physical line.
+                sentence_parts = re.split(
+                    r"\.\s+(?=[A-Z])",
+                    normalized,
+                )
+
+                if len(sentence_parts) > 1:
+                    for candidate in reversed(
+                        sentence_parts[1:]
+                    ):
+                        candidate = self._normalize_layout_text(
+                            candidate
+                        )
+
+                        if not candidate:
+                            continue
+
+                        if self._looks_like_heading(
+                            candidate
+                        ):
+                            return [candidate]
+
+                # Only after checking for a flattened prose + heading
+                # transition should the complete segment be treated as a
+                # standalone heading.
+                if self._looks_like_heading(
+                    normalized
+                ):
+                    return [normalized]
+
+            # Once we encounter an ordinary factual line, do not walk
+            # backwards through unrelated sibling content looking for an
+            # earlier heading.
+            if not self._looks_like_heading(line):
+                break
+
+        return []
+
+
+
+    def _extract_parent_heading(
+        self,
+        prefix: str,
+        current_heading: str,
+    ) -> str | None:
+        """Extract the immediate parent heading of the current leaf heading."""
+
+        if not prefix.strip():
+            return None
+
+        normalized_current = self._normalize_layout_text(
+            current_heading
         )
+
+        if not normalized_current:
+            return None
+
+        lines = self._prepare_lines(prefix)
+
+        if len(lines) < 2:
+            return None
+
+        current_index: int | None = None
+
+        for index in range(
+            len(lines) - 1,
+            -1,
+            -1,
+        ):
+            if (
+                self._normalize_layout_text(
+                    lines[index]
+                )
+                == normalized_current
+            ):
+                current_index = index
+                break
+
+        if current_index is None:
+            return None
+
+        # Only a heading immediately preceding the current leaf can be
+        # considered its parent. This deliberately avoids walking backwards
+        # through previous sibling headings.
+        for index in range(
+            current_index - 1,
+            -1,
+            -1,
+        ):
+            candidate = lines[index]
+
+            if not self._looks_like_heading(
+                candidate
+            ):
+                return None
+
+            if (
+                self._normalize_layout_text(
+                    candidate
+                )
+                == normalized_current
+            ):
+                continue
+
+            return candidate
+
+        return None
+
+
 
     def _extract_structural_context_from_source(
         self,
@@ -1327,7 +1391,6 @@ class ExtractionCandidateBuilder:
             ),
         )
 
-
     def _prepare_lines(
         self,
         text: str,
@@ -1355,9 +1418,6 @@ class ExtractionCandidateBuilder:
                 if lines:
                     previous = lines[-1]
 
-                    # A standalone label immediately preceding a
-                    # question/activity instruction is not factual
-                    # source content.
                     if (
                         index > 0
                         and previous
@@ -1385,7 +1445,6 @@ class ExtractionCandidateBuilder:
 
         return lines
 
-
     def _normalize_source_layout(
         self,
         text: str,
@@ -1412,6 +1471,8 @@ class ExtractionCandidateBuilder:
             lines
         )
 
+    
+    
     def _normalize_layout_text(
         self,
         text: str,
@@ -1432,9 +1493,13 @@ class ExtractionCandidateBuilder:
                 )
             )
 
+        # Preserve structural bullet markers so the candidate builder can
+        # deterministically split bullet-based source content. Some PDF/OCR
+        # pipelines emit the bullet as the character "Æ"; normalize that
+        # artifact to the canonical bullet marker used by _BULLET_PATTERN.
         value = re.sub(
-            r"^[Æ●•▪◦‣]\s*",
-            "",
+            r"^Æ\s*",
+            "● ",
             value,
         )
 
@@ -1443,6 +1508,8 @@ class ExtractionCandidateBuilder:
         ).strip()
 
         return value
+
+    
 
     def _looks_like_character_spaced_text(
         self,
@@ -1588,7 +1655,7 @@ class ExtractionCandidateBuilder:
 
         return result
 
-
+    
     def _looks_like_heading(
         self,
         text: str,
@@ -1630,7 +1697,6 @@ class ExtractionCandidateBuilder:
 
         lower = value.lower()
 
-        # Obvious prose/instruction prefixes.
         prose_prefixes = (
             "it ",
             "this ",
@@ -1656,7 +1722,6 @@ class ExtractionCandidateBuilder:
         ):
             return False
 
-        # Obvious PDF/layout artifacts.
         if lower.startswith(
             (
                 "chapter ",
@@ -1667,31 +1732,27 @@ class ExtractionCandidateBuilder:
         ):
             return False
 
-        # Structural separators are strong heading signals.
         if ":" in value:
             return True
 
         if "|" in value:
             return True
 
-
-         # Parenthesized suffixes often indicate structural metadata.
         if (
             value.endswith(")")
             and "(" in value
         ):
             return True
 
-        # Short all-uppercase text is commonly a heading.
+        # A single all-uppercase token such as "US", "MVP", or "OCI"
+        # is not sufficient evidence of a structural heading.
         if (
             value.isupper()
+            and len(words) >= 2
             and len(words) <= 10
         ):
             return True
 
-
-
-        # Title-case text is a useful heading signal.
         capitalized_words = sum(
             1
             for word in words

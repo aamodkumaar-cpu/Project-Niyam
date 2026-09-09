@@ -7,24 +7,27 @@ Type:
 
 Purpose:
 
-    Analyze extraction questions and identify deterministic
-    evidence requirements.
+    Analyze question characteristics to determine the evidence
+    required for source-grounded extraction.
 
 Responsibilities:
 
-    - Identify evidence characteristics required by a question.
-    - Identify role questions.
-    - Identify relationship or synthesis questions.
-    - Identify exhaustive requests.
-    - Extract explicit maximum-per-heading constraints.
+    - Determine evidence requirements.
+    - Detect role questions.
+    - Detect relationship questions.
+    - Detect exhaustive requests.
+    - Detect quantitative requirements.
+    - Detect temporal requirements.
+    - Detect structural-value requirements.
+    - Detect explicit per-heading limits.
 
 Does NOT:
 
     - Retrieve knowledge.
-    - Build candidates.
     - Rank candidates.
+    - Select candidates.
     - Call the LLM.
-    - Generate factual content.
+    - Interpret domain-specific entities.
 """
 
 from __future__ import annotations
@@ -35,7 +38,52 @@ from backend.extraction.EvidenceRequirement import EvidenceRequirement
 
 
 class ExtractionQuestionAnalyzer:
-    """Analyze deterministic evidence requirements expressed by a question."""
+    """Analyze questions to determine extraction evidence requirements."""
+
+    _MAX_PER_HEADING_PATTERNS = (
+        re.compile(
+            r"\b(?:top|first|best)\s+(\d+)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bmax(?:imum)?\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bup\s+to\s+(\d+)\s+"
+            r"(?:bullet\s+points?|points?|items?)\b",
+            re.IGNORECASE,
+        ),
+    )
+
+    _EXHAUSTIVE_PATTERN = re.compile(
+        r"\b(?:all|each|every|list|enumerate)\b",
+        re.IGNORECASE,
+    )
+
+    _QUANTITY_PATTERN = re.compile(
+        r"\b(?:how\s+many|how\s+much|total|number|count|"
+        r"years?|months?|percentage|percent|amount|duration)\b",
+        re.IGNORECASE,
+    )
+
+    _TEMPORAL_PATTERN = re.compile(
+        r"\b(?:when|date|year|month|period|duration|"
+        r"start(?:ed)?|end(?:ed)?|joined|left|between|"
+        r"experience|experiences)\b",
+        re.IGNORECASE,
+    )
+
+    _STRUCTURAL_VALUE_PATTERN = re.compile(
+        r"^\s*what\s+"
+        r"(?:\w+\s+){1,3}"
+        r"(?:did|does|do|is|are|was|were|has|have|had)\b",
+        re.IGNORECASE,
+    )
+
+    def __init__(self) -> None:
+        """Initialize the question analyzer."""
 
     def determine_evidence_requirement(
         self,
@@ -43,143 +91,88 @@ class ExtractionQuestionAnalyzer:
     ) -> EvidenceRequirement:
         """Determine the evidence characteristics required by a question."""
 
-        normalized = question.lower().strip()
-
         return EvidenceRequirement(
             direct_answer_required=True,
-            quantity_required=self._requires_quantity(
-                normalized
-            ),
-            temporal_value_required=self._requires_temporal_value(
-                normalized
-            ),
-            relationship_required=self.is_relationship_question(
-                normalized
-            ),
+            quantity_required=self._requires_quantity(question),
+            temporal_value_required=self._requires_temporal_value(question),
+            relationship_required=self.is_relationship_question(question),
+            structural_value_required=self._requires_structural_value(question),
         )
 
     def is_role_question(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question asks for a role or position."""
+        """Determine whether the question asks for a role or position."""
 
-        normalized = question.lower().strip()
-
-        role_patterns = (
-            r"\bwhat\s+was\b.+\brole\b",
-            r"\bwhat\s+is\b.+\brole\b",
-            r"\bwhat\s+was\b.+\bposition\b",
-            r"\bwhat\s+is\b.+\bposition\b",
-            r"\bwhat\s+position\b",
-            r"\bwhat\s+role\b",
-        )
+        normalized = question.lower()
 
         return any(
+            phrase in normalized
+            for phrase in (
+                "what was the role",
+                "what is the role",
+                "what role",
+                "which role",
+                "what position",
+                "which position",
+            )
+        ) or bool(
             re.search(
-                pattern,
+                r"\b(?:what|which)\s+was\s+"
+                r"\w+(?:'s|’s)\s+"
+                r"(?:role|position)\b",
                 normalized,
             )
-            for pattern in role_patterns
+        ) or bool(
+            re.search(
+                r"\b(?:what|which)\s+is\s+"
+                r"\w+(?:'s|’s)\s+"
+                r"(?:role|position)\b",
+                normalized,
+            )
         )
 
     def is_relationship_question(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question asks for a relationship or synthesis."""
+        """Determine whether the question asks about a relationship."""
 
         normalized = question.lower()
 
-        relationship_patterns = (
-            r"\bhow\s+are\b.+\brelated\b",
-            r"\bhow\s+are\b.+\bassociated\b",
-            r"\bhow\s+does\b.+\brelate\s+to\b",
-            r"\bhow\s+do\b.+\brelate\s+to\b",
-            r"\bhow\s+does\b.+\baffect\b",
-            r"\brelationship\s+between\b",
-            r"\brelation\s+between\b",
-            r"\bconnection\s+between\b",
-            r"\blink\s+between\b",
-            r"\bconnected\b",
-        )
-
         return any(
-            re.search(
-                pattern,
-                normalized,
+            phrase in normalized
+            for phrase in (
+                "associated with",
+                "related to",
+                "relationship between",
+                "relation between",
+                "connected to",
             )
-            for pattern in relationship_patterns
         )
 
     def is_exhaustive_request(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question requests exhaustive coverage."""
+        """Determine whether the question requests exhaustive coverage."""
 
-        normalized = question.lower().strip()
-
-        if re.search(
-            r"\beach\s+other\b",
-            normalized,
-        ):
-            return False
-
-        exhaustive_patterns = (
-            r"\ball\s+(?:the\s+)?(?:items?|points?|facts?|causes?|"
-            r"reasons?|ways?|types?|examples?|factors?)\b",
-
-            r"\beach\s+(?:item|point|fact|cause|reason|way|type|example|factor)\b",
-
-            r"\bevery\s+(?:item|point|fact|cause|reason|way|type|example|factor)\b",
-
-            r"\bfrom\s+all\s+(?:the\s+)?(?:items?|sources?|documents?|"
-            r"companies?|roles?|headings?)\b",
-
-            r"\bfrom\s+each\s+(?:item|source|document)\b",
-
-            r"\bfrom\s+every\s+(?:item|source|document)\b",
-        )
-
-        return any(
-            re.search(
-                pattern,
-                normalized,
-            )
-            for pattern in exhaustive_patterns
+        return bool(
+            self._EXHAUSTIVE_PATTERN.search(question)
         )
 
     def extract_max_per_heading(
         self,
         question: str,
     ) -> int | None:
-        """Extract an explicit maximum-per-heading constraint."""
+        """Extract an optional maximum number of facts per heading."""
 
-        patterns = (
-            r"\b(?:only|exactly)\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)\b",
+        for pattern in self._MAX_PER_HEADING_PATTERNS:
+            match = pattern.search(question)
 
-            r"\b(?:max(?:imum)?|up\s+to)\s+(\d+)\s+"
-            r"(?:bullet\s+points?|points?|items?)\b",
-        )
-
-        for pattern in patterns:
-            match = re.search(
-                pattern,
-                question,
-                flags=re.IGNORECASE,
-            )
-
-            if match is None:
-                continue
-
-            maximum = int(
-                match.group(1)
-            )
-
-            if maximum > 0:
-                return maximum
+            if match is not None:
+                return int(match.group(1))
 
         return None
 
@@ -187,25 +180,31 @@ class ExtractionQuestionAnalyzer:
         self,
         question: str,
     ) -> bool:
-        """Return whether the question explicitly requires quantity evidence."""
+        """Determine whether the question requires quantitative evidence."""
 
         return bool(
-            re.search(
-                r"\b(?:how\s+many|how\s+much|number\s+of|total)\b",
-                question,
-            )
+            self._QUANTITY_PATTERN.search(question)
         )
 
     def _requires_temporal_value(
         self,
         question: str,
     ) -> bool:
-        """Return whether the question requires temporal evidence."""
+        """Determine whether the question requires temporal evidence."""
 
         return bool(
-            re.search(
-                r"\b(?:experience|duration|how\s+long|"
-                r"years?|months?|tenure|since|when)\b",
-                question,
-            )
+            self._TEMPORAL_PATTERN.search(question)
+        )
+
+    def _requires_structural_value(
+        self,
+        question: str,
+    ) -> bool:
+        """Determine whether the question requests a structurally represented value."""
+
+        if self.is_role_question(question):
+            return True
+
+        return bool(
+            self._STRUCTURAL_VALUE_PATTERN.match(question)
         )

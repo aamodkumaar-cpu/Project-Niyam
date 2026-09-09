@@ -25,6 +25,9 @@ from backend.retrieval.KnowledgeNode import KnowledgeNode
 from backend.extraction.ExtractionCandidateRanker import ExtractionCandidateRanker
 from backend.extraction.ExtractionQuestionAnalyzer import ExtractionQuestionAnalyzer
 from backend.extraction.EvidenceSignalDetector import EvidenceSignalDetector
+from backend.extraction.StructuralScopeResolver import (
+    StructuralScopeResolver,
+)
 
 
 class FakeOllamaService:
@@ -130,6 +133,9 @@ def _create_extractor(
         ),
         evidence_selection_safety_gate=EvidenceSelectionSafetyGate(
             keyword_tokenizer=KeywordTokenizer(),
+        ),
+        structural_scope_resolver=StructuralScopeResolver(
+            evidence_signal_detector=EvidenceSignalDetector(),
         ),
     )
 

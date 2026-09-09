@@ -1,5 +1,5 @@
 """
-Knowledge Extractor.
+KnowledgeExtractor.
 
 Type:
     Domain Service
@@ -28,6 +28,7 @@ from __future__ import annotations
 from backend.diagnostic.ExecutionDebuggerContract import (
     ExecutionDebuggerContract,
 )
+from backend.extraction.EvidenceRequirement import EvidenceRequirement
 from backend.extraction.EvidenceSelectionSafetyGate import (
     EvidenceSelectionSafetyGate,
 )
@@ -53,6 +54,9 @@ from backend.extraction.KnowledgeSchema import KnowledgeSchema
 from backend.extraction.SourceQuoteValidator import (
     SourceQuoteValidator,
 )
+from backend.extraction.StructuralScopeResolver import (
+    StructuralScopeResolver,
+)
 from backend.extraction.StructuredKnowledge import StructuredKnowledge
 from backend.llm.LLMClient import LLMClient
 from backend.llm.Message import Messages
@@ -74,6 +78,7 @@ class KnowledgeExtractor:
         question_analyzer: ExtractionQuestionAnalyzer,
         candidate_ranker: ExtractionCandidateRanker,
         evidence_selection_safety_gate: EvidenceSelectionSafetyGate,
+        structural_scope_resolver: StructuralScopeResolver,
     ) -> None:
         """Initialize the knowledge extractor."""
 
@@ -89,6 +94,7 @@ class KnowledgeExtractor:
         self.evidence_selection_safety_gate = (
             evidence_selection_safety_gate
         )
+        self.structural_scope_resolver = structural_scope_resolver
 
     def extract(
         self,
@@ -136,13 +142,22 @@ class KnowledgeExtractor:
             )
         )
 
-        prompt_candidates = (
-            self.candidate_ranker.select_for_prompt(
-                question=question,
-                candidates=safe_candidates,
-                evidence_requirement=evidence_requirement,
+        exhaustive = (
+            self.question_analyzer.is_exhaustive_request(
+                question
             )
         )
+
+        if exhaustive:
+            prompt_candidates = safe_candidates
+        else:
+            prompt_candidates = (
+                self.candidate_ranker.select_for_prompt(
+                    question=question,
+                    candidates=safe_candidates,
+                    evidence_requirement=evidence_requirement,
+                )
+            )
 
         if not prompt_candidates:
             return StructuredKnowledge()
@@ -150,11 +165,10 @@ class KnowledgeExtractor:
         messages: Messages = self.prompt_builder.build(
             question=question,
             candidates=prompt_candidates,
+            evidence_requirement=evidence_requirement,
         )
 
-        self.execution_debugger.prompt(
-            messages
-        )
+        self.execution_debugger.prompt(messages)
 
         response = self.llm_client.generate(
             messages=messages,
@@ -165,18 +179,7 @@ class KnowledgeExtractor:
             response=response,
         )
 
-        selections = self.response_parser.parse(
-            response
-        )
-
-        if not selections:
-            knowledge = StructuredKnowledge()
-
-            self.execution_debugger.extraction(
-                knowledge
-            )
-
-            return knowledge
+        selections = self.response_parser.parse(response)
 
         knowledge = self._build_structured_knowledge(
             selections=selections,
@@ -184,11 +187,11 @@ class KnowledgeExtractor:
             allowed_candidates=safe_candidates,
             question=question,
             role_question=role_question,
+            exhaustive=exhaustive,
+            evidence_requirement=evidence_requirement,
         )
 
-        self.execution_debugger.extraction(
-            knowledge
-        )
+        self.execution_debugger.extraction(knowledge)
 
         return knowledge
 
@@ -199,18 +202,20 @@ class KnowledgeExtractor:
         allowed_candidates: list[ExtractionCandidate],
         question: str,
         role_question: bool,
+        exhaustive: bool,
+        evidence_requirement: EvidenceRequirement,
     ) -> StructuredKnowledge:
-        """Resolve selections and enforce deterministic extraction constraints."""
-
-        candidate_map = {
-            candidate.candidate_id: candidate
-            for candidate in candidates
-        }
+        """Build structured knowledge from validated extraction selections."""
 
         allowed_candidate_ids = {
             candidate.candidate_id
             for candidate in allowed_candidates
         }
+
+        knowledge = StructuredKnowledge()
+
+        selected_ids: set[str] = set()
+        heading_counts: dict[str, int] = {}
 
         maximum = (
             self.question_analyzer.extract_max_per_heading(
@@ -218,37 +223,50 @@ class KnowledgeExtractor:
             )
         )
 
-        exhaustive = (
-            self.question_analyzer.is_exhaustive_request(
-                question
-            )
-        )
-
-        knowledge = StructuredKnowledge()
-
-        selected_ids: set[str] = set()
-        heading_counts: dict[str, int] = {}
-
         self._accept_llm_selections(
             selections=selections,
             candidates=candidates,
-            candidate_map=candidate_map,
             allowed_candidate_ids=allowed_candidate_ids,
             knowledge=knowledge,
             selected_ids=selected_ids,
             heading_counts=heading_counts,
             maximum=maximum,
             role_question=role_question,
+            exhaustive=exhaustive,
+            evidence_requirement=evidence_requirement,
         )
 
-        if exhaustive:
-            self._complete_exhaustive_selection(
+        if not exhaustive:
+            return knowledge
+
+        selected_candidates = [
+            candidate
+            for candidate in allowed_candidates
+            if candidate.candidate_id in selected_ids
+        ]
+
+        exhaustive_candidates = (
+            self.structural_scope_resolver.resolve(
+                selected_candidates=selected_candidates,
                 candidates=allowed_candidates,
-                knowledge=knowledge,
-                selected_ids=selected_ids,
-                heading_counts=heading_counts,
-                maximum=maximum,
             )
+        )
+
+        self._complete_exhaustive_selection(
+            candidates=exhaustive_candidates,
+            selections=selections,
+            candidate_map={
+                candidate.candidate_id: candidate
+                for candidate in candidates
+            },
+            evidence_requirement=evidence_requirement,
+            relationship_question=False,
+            role_question=role_question,
+            max_per_heading=maximum,
+            facts=knowledge.facts,
+            selected_ids=selected_ids,
+            heading_counts=heading_counts,
+        )
 
         return knowledge
 
@@ -256,15 +274,21 @@ class KnowledgeExtractor:
         self,
         selections: list[ExtractionSelection],
         candidates: list[ExtractionCandidate],
-        candidate_map: dict[str, ExtractionCandidate],
         allowed_candidate_ids: set[str],
         knowledge: StructuredKnowledge,
         selected_ids: set[str],
         heading_counts: dict[str, int],
         maximum: int | None,
         role_question: bool,
+        exhaustive: bool,
+        evidence_requirement: EvidenceRequirement,
     ) -> None:
         """Accept valid, grounded, authorized LLM selections."""
+
+        candidate_map = {
+            candidate.candidate_id: candidate
+            for candidate in candidates
+        }
 
         for selection in selections:
             candidate_id = selection["candidate_id"]
@@ -275,19 +299,29 @@ class KnowledgeExtractor:
             if candidate_id not in allowed_candidate_ids:
                 continue
 
-            candidate = candidate_map[candidate_id]
-
             if candidate_id in selected_ids:
                 continue
 
-            if maximum is not None:
-                current_count = heading_counts.get(
-                    candidate.heading,
-                    0,
-                )
+            candidate = candidate_map[candidate_id]
 
-                if current_count >= maximum:
-                    continue
+            heading = self._candidate_heading(candidate)
+
+            current_count = heading_counts.get(
+                heading,
+                0,
+            )
+
+            if (
+                maximum is not None
+                and current_count >= maximum
+            ):
+                continue
+
+            if exhaustive and not self._has_required_structural_evidence(
+                candidate=candidate,
+                evidence_requirement=evidence_requirement,
+            ):
+                continue
 
             if self._is_ambiguous_candidate(
                 candidate=candidate,
@@ -313,43 +347,42 @@ class KnowledgeExtractor:
                 value=value,
             )
 
-            knowledge.facts.append(
-                fact
-            )
+            if self._is_duplicate(
+                fact=fact,
+                knowledge=knowledge,
+            ):
+                continue
 
-            selected_ids.add(
-                candidate_id
-            )
+            knowledge.facts.append(fact)
 
-            heading_counts[candidate.heading] = (
-                heading_counts.get(
-                    candidate.heading,
-                    0,
-                )
-                + 1
+            selected_ids.add(candidate_id)
+
+            heading_counts[heading] = (
+                current_count + 1
             )
 
     def _complete_exhaustive_selection(
         self,
         candidates: list[ExtractionCandidate],
-        knowledge: StructuredKnowledge,
+        selections: list[ExtractionSelection],
+        candidate_map: dict[str, ExtractionCandidate],
+        evidence_requirement: EvidenceRequirement,
+        relationship_question: bool,
+        role_question: bool,
+        max_per_heading: int | None,
+        facts: list[KnowledgeFact],
         selected_ids: set[str],
         heading_counts: dict[str, int],
-        maximum: int | None,
     ) -> None:
-        """Complete exhaustive requests across every represented heading."""
+        """Complete exhaustive extraction without trusting the LLM for coverage."""
 
         headings: list[str] = []
 
         for candidate in candidates:
-            heading = self._candidate_heading(
-                candidate
-            )
+            heading = self._candidate_heading(candidate)
 
             if heading not in headings:
-                headings.append(
-                    heading
-                )
+                headings.append(heading)
 
         for heading in headings:
             current_count = heading_counts.get(
@@ -357,32 +390,27 @@ class KnowledgeExtractor:
                 0,
             )
 
-            if (
-                maximum is not None
-                and current_count >= maximum
-            ):
-                continue
+            heading_candidates = [
+                candidate
+                for candidate in candidates
+                if self._candidate_heading(candidate) == heading
+            ]
 
-            for candidate in candidates:
+            for candidate in heading_candidates:
                 if (
-                    self._candidate_heading(
-                        candidate
-                    )
-                    != heading
-                ):
-                    continue
-
-                if (
-                    candidate.candidate_id
-                    in selected_ids
-                ):
-                    continue
-
-                if (
-                    maximum is not None
-                    and current_count >= maximum
+                    max_per_heading is not None
+                    and current_count >= max_per_heading
                 ):
                     break
+
+                if candidate.candidate_id in selected_ids:
+                    continue
+
+                if not self._has_required_structural_evidence(
+                    candidate=candidate,
+                    evidence_requirement=evidence_requirement,
+                ):
+                    continue
 
                 if self._is_ambiguous_candidate(
                     candidate=candidate,
@@ -396,21 +424,30 @@ class KnowledgeExtractor:
                 ):
                     continue
 
+                value = (
+                    candidate.heading
+                    if role_question
+                    else candidate.source_quote
+                )
+
                 fact = self._create_fact(
                     candidate=candidate,
                     confidence=1.0,
-                    value=candidate.source_quote,
+                    value=value,
                 )
 
                 if self._is_duplicate(
                     fact=fact,
-                    knowledge=knowledge,
+                    knowledge=StructuredKnowledge(
+                        facts=facts
+                    ),
                 ):
+                    selected_ids.add(
+                        candidate.candidate_id
+                    )
                     continue
 
-                knowledge.facts.append(
-                    fact
-                )
+                facts.append(fact)
 
                 selected_ids.add(
                     candidate.candidate_id
@@ -418,9 +455,51 @@ class KnowledgeExtractor:
 
                 current_count += 1
 
-                heading_counts[heading] = (
-                    current_count
-                )
+            heading_counts[heading] = current_count
+
+    def _select_exhaustive_representative(
+        self,
+        candidates: list[ExtractionCandidate],
+        evidence_requirement,
+    ) -> ExtractionCandidate | None:
+        """Select the strongest evidence-bearing candidate for a structural group."""
+
+        eligible = [
+            candidate
+            for candidate in candidates
+            if self._has_required_structural_evidence(
+                candidate=candidate,
+                evidence_requirement=evidence_requirement,
+            )
+        ]
+
+        if not eligible:
+            return None
+
+        return eligible[0]
+
+    def _has_required_structural_evidence(
+        self,
+        candidate: ExtractionCandidate,
+        evidence_requirement,
+    ) -> bool:
+        """Return whether a candidate contains the structural evidence required by the question."""
+
+        if not evidence_requirement.structural_value_required:
+            return True
+
+        heading = " ".join(
+            candidate.heading.split()
+        ).strip()
+
+        structural_context = " ".join(
+            candidate.structural_context.split()
+        ).strip()
+
+        if not heading and not structural_context:
+            return False
+
+        return True
 
     def _candidate_heading(
         self,
@@ -472,13 +551,19 @@ class KnowledgeExtractor:
         self,
         candidate: ExtractionCandidate,
         confidence: float,
-        value: str,
+        value: str = "",
     ) -> KnowledgeFact:
         """Create a source-owned knowledge fact."""
 
+        resolved_value = (
+            value
+            if value
+            else candidate.source_quote
+        )
+
         return KnowledgeFact(
             name=self._candidate_heading(candidate),
-            value=value,
+            value=resolved_value,
             source=candidate.source,
             page_number=candidate.page_number,
             confidence=confidence,
@@ -499,6 +584,4 @@ class KnowledgeExtractor:
             confidence=confidence,
         )
 
-        self.execution_debugger.rejected_fact(
-            fact
-        )
+        self.execution_debugger.rejected_fact(fact)

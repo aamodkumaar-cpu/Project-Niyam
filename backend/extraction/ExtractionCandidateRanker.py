@@ -1,24 +1,30 @@
 """
 Type:
+
     Domain Service
 
 Purpose:
+
     Rank extraction candidates using deterministic lexical relevance
     and generic evidence characteristics.
 
 Responsibilities:
+
     - Calculate candidate-level lexical relevance.
     - Use structural scope to establish question relevance.
     - Evaluate generic evidence characteristics through EvidenceSignalDetector.
     - Rank candidates deterministically.
     - Select a bounded evidence set for LLM processing.
+    - Preserve structural coverage when structural evidence is required.
 
 Does NOT:
+
     - Retrieve knowledge.
     - Interpret facts.
     - Validate source evidence.
     - Call the LLM.
     - Generate answers.
+    - Apply domain-specific entity rules.
 """
 
 from __future__ import annotations
@@ -120,9 +126,7 @@ class ExtractionCandidateRanker:
         self.keyword_scorer = keyword_scorer
         self.evidence_signal_detector = evidence_signal_detector
         self.maximum_candidates = maximum_candidates
-        self.minimum_relative_score = (
-            minimum_relative_score
-        )
+        self.minimum_relative_score = minimum_relative_score
 
     def rank(
         self,
@@ -135,9 +139,7 @@ class ExtractionCandidateRanker:
         if not candidates:
             return []
 
-        question_tokens = self._get_question_tokens(
-            question
-        )
+        question_tokens = self._get_question_tokens(question)
 
         if not question_tokens:
             return candidates
@@ -190,7 +192,7 @@ class ExtractionCandidateRanker:
         candidates: list[ExtractionCandidate],
         evidence_requirement: EvidenceRequirement | None = None,
     ) -> list[ExtractionCandidate]:
-        """Return a bounded set of highest-ranked candidates for the LLM."""
+        """Return a bounded evidence set for the LLM."""
 
         ranked = self.rank(
             question=question,
@@ -201,14 +203,10 @@ class ExtractionCandidateRanker:
         if not ranked:
             return []
 
-        question_tokens = self._get_question_tokens(
-            question
-        )
+        question_tokens = self._get_question_tokens(question)
 
         if not question_tokens:
-            return ranked[
-                :self.maximum_candidates
-            ]
+            return ranked[: self.maximum_candidates]
 
         requirement = (
             evidence_requirement
@@ -231,13 +229,16 @@ class ExtractionCandidateRanker:
         highest_score = scored[0][0]
 
         if highest_score <= 0.0:
-            return ranked[
-                :self.maximum_candidates
-            ]
+            if requirement.structural_value_required:
+                return self._select_structural_candidates(
+                    ranked=ranked,
+                    maximum_candidates=self.maximum_candidates,
+                )
+
+            return ranked[: self.maximum_candidates]
 
         minimum_score = (
-            highest_score
-            * self.minimum_relative_score
+            highest_score * self.minimum_relative_score
         )
 
         relevant = [
@@ -246,9 +247,158 @@ class ExtractionCandidateRanker:
             if score >= minimum_score
         ]
 
-        return relevant[
-            :self.maximum_candidates
+        if not requirement.structural_value_required:
+            return relevant[: self.maximum_candidates]
+
+        return self._select_with_structural_coverage(
+            ranked=ranked,
+            relevant=relevant,
+            maximum_candidates=self.maximum_candidates,
+        )
+
+    def _select_with_structural_coverage(
+        self,
+        ranked: list[ExtractionCandidate],
+        relevant: list[ExtractionCandidate],
+        maximum_candidates: int,
+    ) -> list[ExtractionCandidate]:
+        """Preserve structural coverage while respecting the candidate bound."""
+
+        selected: list[ExtractionCandidate] = []
+        selected_ids: set[str] = set()
+        represented_groups: set[str] = set()
+
+        structural_candidates = [
+            candidate
+            for candidate in ranked
+            if self._has_structural_evidence(candidate)
         ]
+
+        for candidate in structural_candidates:
+            group_key = self._get_structural_group_key(candidate)
+
+            if group_key in represented_groups:
+                continue
+
+            selected.append(candidate)
+            selected_ids.add(candidate.candidate_id)
+            represented_groups.add(group_key)
+
+            if len(selected) >= maximum_candidates:
+                return selected
+
+        for candidate in relevant:
+            if candidate.candidate_id in selected_ids:
+                continue
+
+            selected.append(candidate)
+            selected_ids.add(candidate.candidate_id)
+
+            if len(selected) >= maximum_candidates:
+                return selected
+
+        for candidate in ranked:
+            if candidate.candidate_id in selected_ids:
+                continue
+
+            selected.append(candidate)
+            selected_ids.add(candidate.candidate_id)
+
+            if len(selected) >= maximum_candidates:
+                break
+
+        return selected
+
+    def _select_structural_candidates(
+        self,
+        ranked: list[ExtractionCandidate],
+        maximum_candidates: int,
+    ) -> list[ExtractionCandidate]:
+        """Select bounded candidates while preserving structural coverage."""
+
+        selected: list[ExtractionCandidate] = []
+        represented_groups: set[str] = set()
+
+        for candidate in ranked:
+            if not self._has_structural_evidence(candidate):
+                continue
+
+            group_key = self._get_structural_group_key(candidate)
+
+            if group_key in represented_groups:
+                continue
+
+            selected.append(candidate)
+            represented_groups.add(group_key)
+
+            if len(selected) >= maximum_candidates:
+                break
+
+        if len(selected) >= maximum_candidates:
+            return selected
+
+        selected_ids = {
+            candidate.candidate_id
+            for candidate in selected
+        }
+
+        for candidate in ranked:
+            if candidate.candidate_id in selected_ids:
+                continue
+
+            selected.append(candidate)
+
+            if len(selected) >= maximum_candidates:
+                break
+
+        return selected
+
+    def _has_structural_evidence(
+        self,
+        candidate: ExtractionCandidate,
+    ) -> bool:
+        """Return whether the candidate contains structural evidence."""
+
+        return bool(
+            self._normalize_structural_text(
+                candidate.heading
+            )
+            or self._normalize_structural_text(
+                candidate.structural_context
+            )
+        )
+
+    def _get_structural_group_key(
+        self,
+        candidate: ExtractionCandidate,
+    ) -> str:
+        """Return a deterministic key representing one structural context."""
+
+        heading = self._normalize_structural_text(
+            candidate.heading
+        )
+
+        if heading:
+            return f"heading:{heading}"
+
+        structural_context = self._normalize_structural_text(
+            candidate.structural_context
+        )
+
+        if structural_context:
+            return f"context:{structural_context}"
+
+        return f"candidate:{candidate.candidate_id}"
+
+    def _normalize_structural_text(
+        self,
+        text: str,
+    ) -> str:
+        """Normalize structural text for deterministic grouping."""
+
+        return " ".join(
+            text.split()
+        ).casefold()
 
     def _score_candidate(
         self,

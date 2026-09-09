@@ -37,3 +37,4 @@ class EvidenceRequirement:
     quantity_required: bool = False
     temporal_value_required: bool = False
     relationship_required: bool = False
+    structural_value_required: bool = False
